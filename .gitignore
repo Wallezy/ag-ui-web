@@ -1,0 +1,109 @@
+### gradle ###
+.gradle
+/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Compiled class file
+*.class
+
+### STS ###
+.settings/
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+bin/
+.sts4-cache
+
+# Log file
+*/logs/
+*.log.gz
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+rebel.xml
+derby.log
+
+### NetBeans ###
+nbproject/private/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+nbbuild/
+nbdist/
+.nb-gradle/
+
+### maven ###
+target/
+target/*
+*.war
+*.ear
+*.zip
+*.tar
+*.tar.gz
+*.gz
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# BlueJ files
+*.ctxt
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
+# Package Files #
+*.jar
+*.nar
+*.rar
+
+# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
+### temp ignore ###
+*.cache
+*.diff
+*.patch
+dump.rdb
+*.tmp
+tmp
+tmp/*
+*.java~
+*.properties~
+*.xml~
+/file:/
+.log
+/logs
+.flattened-pom.xml
+.pom.xml
+
+# virtual machine crash logs
+hs_err_pid*
+
+### system ignore ###
+.DS_Store
+Thumbs.db
+Servers
+.metadata
+.gitee
+
+### VS Code ###
+.vscode/
+
+### nodejs ###
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
