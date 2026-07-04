@@ -8,7 +8,7 @@ const { Text, Title } = Typography;
 export type ConversationSummary = {
   id: string;
   title: string;
-  status: 'idle' | 'running' | 'completed' | 'error';
+  status: 'idle' | 'running' | 'completed' | 'error' | 'waiting_auth';
   updatedAt: number;
 };
 
@@ -17,6 +17,15 @@ const statusColor = {
   running: 'processing',
   completed: 'success',
   error: 'error',
+  waiting_auth: 'warning',
+} as const;
+
+const statusText = {
+  idle: '新建',
+  running: '运行中',
+  completed: '完成',
+  error: '失败',
+  waiting_auth: '待授权',
 } as const;
 
 export function ConversationSidebar({
@@ -38,7 +47,7 @@ export function ConversationSidebar({
       label: (
         <div className="conversation-label">
           <span>{conversation.title}</span>
-          <Tag color={statusColor[conversation.status]}>{conversation.status === 'running' ? '运行中' : conversation.status === 'error' ? '失败' : conversation.status === 'completed' ? '完成' : '新建'}</Tag>
+          <Tag color={statusColor[conversation.status]}>{statusText[conversation.status]}</Tag>
         </div>
       ),
       group: '实时会话',

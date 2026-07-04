@@ -78,6 +78,16 @@ tmp/*
 .log
 /logs
 .flattened-pom.xml
+
+### frontend local artifacts ###
+.npm-cache/
+.playwright-cli/
+.tsbuild/
+output/playwright/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+pnpm-lock.yaml
 .pom.xml
 
 # virtual machine crash logs

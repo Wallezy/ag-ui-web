@@ -2,19 +2,35 @@ import { Avatar, Space, Tag, Typography } from 'antd';
 import { Bubble } from '@ant-design/x';
 import { Bot, UserRound } from 'lucide-react';
 import type { A2UIActionPayload } from '../../a2ui/renderer';
-import type { A2UISurfaceState, ChatMessage } from '../../agui/eventTypes';
+import type { A2UISurfaceState, ActionItem, ChatMessage } from '../../agui/eventTypes';
 import { HybridBlockRenderer } from './HybridBlockRenderer';
 
 const { Text } = Typography;
+
+const assistantStatusColor = {
+  streaming: 'processing',
+  completed: 'green',
+  error: 'red',
+  interrupted: 'orange',
+} as const;
+
+const assistantStatusText = {
+  streaming: '运行中',
+  completed: '已完成',
+  error: '异常',
+  interrupted: '待授权',
+} as const;
 
 export function MessageList({
   messages,
   surfaces,
   onA2UIAction,
+  onAssistantAction,
 }: {
   messages: ChatMessage[];
   surfaces: Record<string, A2UISurfaceState>;
   onA2UIAction?: (payload: A2UIActionPayload) => void;
+  onAssistantAction?: (action: ActionItem) => void;
 }) {
   const items = messages.map((message) => {
     if (message.role === 'user') {
@@ -37,15 +53,21 @@ export function MessageList({
       header: (
         <Space size={8}>
           <Text strong>融卡智能体</Text>
-          <Tag color={message.status === 'error' ? 'red' : message.status === 'streaming' ? 'processing' : 'green'}>
-            {message.status === 'streaming' ? '运行中' : message.status === 'error' ? '异常' : '已完成'}
+          <Tag color={assistantStatusColor[message.status ?? 'completed']}>
+            {assistantStatusText[message.status ?? 'completed']}
           </Tag>
         </Space>
       ),
       content: (
         <div className="assistant-message">
           {message.blocks.map((block, index) => (
-            <HybridBlockRenderer key={`${message.id}-${index}`} block={block} surfaces={surfaces} onA2UIAction={onA2UIAction} />
+            <HybridBlockRenderer
+              key={`${message.id}-${index}`}
+              block={block}
+              surfaces={surfaces}
+              onA2UIAction={onA2UIAction}
+              onAssistantAction={onAssistantAction}
+            />
           ))}
         </div>
       ),

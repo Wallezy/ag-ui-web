@@ -37,6 +37,7 @@ export async function runAgentSse(
 ) {
   const response = await fetch(endpoint, {
     method: 'POST',
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',

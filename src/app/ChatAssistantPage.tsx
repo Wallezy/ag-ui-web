@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { App as AntdApp, Button, Space, Tag, Typography } from 'antd';
-import { Bot, Cable, CircleStop, Play, RadioTower } from 'lucide-react';
+import { Bot, Cable, CircleStop, KeyRound, LogOut, Play, RadioTower } from 'lucide-react';
 import type { A2UIActionPayload } from '../a2ui/renderer';
-import type { AguiEvent, AssistantMessage, ChatMessage, ChatRuntimeState, DemoScenario } from '../agui/eventTypes';
+import type { ActionItem, AguiEvent, AssistantMessage, ChatMessage, ChatRuntimeState, DemoScenario } from '../agui/eventTypes';
 import { aguiEventReducer, createInitialRuntimeState, reduceAguiEvents, withUserQuestion } from '../agui/eventReducer';
 import { runAgentSse } from '../agui/aguiClient';
 import { demoScenarios, getDemoById } from '../data/demos';
@@ -11,6 +11,8 @@ import { ConversationSidebar, type ConversationSummary } from '../components/lay
 import { MessageList } from '../components/chat/MessageList';
 import { RightInspector } from '../components/layout/RightInspector';
 import { SenderBar } from '../components/chat/SenderBar';
+import { OaLoginModal, type OaLoginValues } from '../components/oa/OaLoginModal';
+import { getOaSession, loginOa, logoutOa, type OaAuthContext, type OaSessionStatus } from '../oa/oaAuthClient';
 
 const { Text, Title } = Typography;
 
@@ -59,6 +61,31 @@ const liveScenario: DemoScenario = {
 };
 
 const isLiveConversationId = (id: string) => id.startsWith('thread-web-');
+const AGENT_ID = 'oa-agent';
+
+type PendingAgentRun = {
+  content: string;
+  conversationId: string;
+  authContext: OaAuthContext;
+  appendUserMessage: boolean;
+  retryExistingUser?: boolean;
+  loginEndpoint?: string;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+
+const textValue = (value: unknown, fallback: string) => {
+  if (value === undefined || value === null || String(value).trim() === '') return fallback;
+  return String(value);
+};
+
+const optionalText = (value: unknown) => {
+  if (value === undefined || value === null || String(value).trim() === '') return undefined;
+  return String(value);
+};
+
+const isOaLoginRequiredEvent = (event: AguiEvent) => event.type === 'CUSTOM' && event.name === 'oa.login_required';
 
 const createLiveConversationState = (threadId: string): ChatRuntimeState => ({
   ...createInitialRuntimeState(threadId),
@@ -97,14 +124,22 @@ export function ChatAssistantPage() {
   const [input, setInput] = useState('');
   const [isReplaying, setIsReplaying] = useState(false);
   const [isBackendRunning, setIsBackendRunning] = useState(false);
+  const [oaLoginOpen, setOaLoginOpen] = useState(false);
+  const [oaLoginLoading, setOaLoginLoading] = useState(false);
+  const [oaLoginMessage, setOaLoginMessage] = useState('');
+  const [oaAuthContext, setOaAuthContext] = useState<OaAuthContext>();
+  const [oaSession, setOaSession] = useState<OaSessionStatus | null>(null);
+  const [pendingRun, setPendingRun] = useState<PendingAgentRun | null>(null);
   const replayTimer = useRef<number | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
+  const activeRunRef = useRef<PendingAgentRun | null>(null);
   const transcriptRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     return () => {
       if (replayTimer.current) window.clearInterval(replayTimer.current);
       abortRef.current?.abort();
+      activeRunRef.current = null;
     };
   }, []);
 
@@ -146,7 +181,65 @@ export function ChatAssistantPage() {
   const stopBackendRun = () => {
     abortRef.current?.abort();
     abortRef.current = null;
+    activeRunRef.current = null;
     setIsBackendRunning(false);
+  };
+
+  const buildOaAuthContext = (
+    threadId: string,
+    runId?: string,
+    traceId?: string,
+    override?: Partial<OaAuthContext>,
+  ): OaAuthContext => ({
+    agentId: textValue(override?.agentId, AGENT_ID),
+    threadId: textValue(override?.threadId, threadId),
+    userId: optionalText(override?.userId),
+    tenantId: optionalText(override?.tenantId),
+    sessionId: optionalText(override?.sessionId),
+    runId: textValue(override?.runId, runId ?? ''),
+    traceId: textValue(override?.traceId, traceId ?? ''),
+  });
+
+  const authContextFromLoginEvent = (event: AguiEvent, fallback: OaAuthContext) => {
+    const value = asRecord(event.value);
+    const eventContext = asRecord(value.authContext) as Partial<OaAuthContext>;
+    return buildOaAuthContext(fallback.threadId ?? '', fallback.runId, fallback.traceId, eventContext);
+  };
+
+  useEffect(() => {
+    if (!isLiveConversationId(activeId)) return;
+    const authContext = buildOaAuthContext(activeId);
+    setOaAuthContext(authContext);
+    let cancelled = false;
+    void getOaSession(authContext)
+      .then((session) => {
+        if (!cancelled) setOaSession(session);
+      })
+      .catch(() => {
+        if (!cancelled) setOaSession(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeId]);
+
+  const openOaLogin = (run: PendingAgentRun, message: string) => {
+    setPendingRun(run);
+    setOaAuthContext(run.authContext);
+    setOaLoginMessage(message);
+    setOaLoginOpen(true);
+  };
+
+  const queueOaLogin = (run: PendingAgentRun, message: string) => {
+    setPendingRun(run);
+    setOaAuthContext(run.authContext);
+    setOaLoginMessage(message);
+    setOaLoginOpen(false);
+  };
+
+  const trimAfterLastUserMessage = (messages: ChatMessage[]) => {
+    const lastUserIndex = messages.map((message) => message.role).lastIndexOf('user');
+    return lastUserIndex >= 0 ? messages.slice(0, lastUserIndex + 1) : messages;
   };
 
   const replayDemo = (demo = activeDemo) => {
@@ -208,28 +301,57 @@ export function ChatAssistantPage() {
     setState(next);
   };
 
-  const submitMessage = async (value: string) => {
+  const startBackendRun = async (
+    value: string,
+    options: {
+      conversationId?: string;
+      appendUserMessage?: boolean;
+      retryExistingUser?: boolean;
+      authContext?: OaAuthContext;
+    } = {},
+  ) => {
     const content = value.trim();
     if (!content) return;
     stopReplay();
     stopBackendRun();
-    const currentIsLive = isLiveConversationId(activeId);
-    const conversationId = currentIsLive ? activeId : `thread-web-${Date.now()}`;
-    const baseState = currentIsLive ? state : createLiveConversationState(conversationId);
-    if (!currentIsLive) {
-      setActiveId(conversationId);
-      setConversations((prev) => [
-        {
-          id: conversationId,
-          title: content.slice(0, 18),
-          status: 'running',
-          updatedAt: Date.now(),
-        },
-        ...prev,
-      ]);
-    }
-    const clientMessageId = `user-web-${Date.now()}`;
+    setPendingRun(null);
+    setOaLoginMessage('');
+
+    const conversationId = options.conversationId ?? (isLiveConversationId(activeId) ? activeId : `thread-web-${Date.now()}`);
     const runId = `run-web-${Date.now()}`;
+    const traceId = `trace-web-${Date.now()}`;
+    const authContext = options.authContext
+      ? buildOaAuthContext(conversationId, runId, traceId, { ...options.authContext, runId, traceId })
+      : buildOaAuthContext(conversationId, runId, traceId);
+
+    const existingState = conversationId === activeId && isLiveConversationId(activeId)
+      ? state
+      : conversationStates[conversationId];
+    const baseState = existingState ?? createLiveConversationState(conversationId);
+    const appendUserMessage = options.appendUserMessage ?? true;
+    const preparedMessages = options.retryExistingUser ? trimAfterLastUserMessage(baseState.messages) : [...baseState.messages];
+    let clientMessageId = `user-web-${Date.now()}`;
+    if (appendUserMessage) {
+      preparedMessages.push({
+        id: clientMessageId,
+        role: 'user',
+        content,
+        createdAt: Date.now(),
+      });
+    } else {
+      const lastUser = [...preparedMessages].reverse().find((message): message is Extract<ChatMessage, { role: 'user' }> => message.role === 'user');
+      if (lastUser) {
+        clientMessageId = lastUser.id;
+      } else {
+        preparedMessages.push({
+          id: clientMessageId,
+          role: 'user',
+          content,
+          createdAt: Date.now(),
+        });
+      }
+    }
+
     const pendingAssistantMessageId = `assistant-pending-${runId}`;
     const threadId = baseState.threadId;
     const next: ChatRuntimeState = {
@@ -241,17 +363,33 @@ export function ChatAssistantPage() {
       activities: {},
       eventLog: [],
       currentAssistantMessageId: pendingAssistantMessageId,
-      messages: [
-        ...baseState.messages,
-        {
-          id: clientMessageId,
-          role: 'user',
-          content,
-          createdAt: Date.now(),
-        },
-      ],
+      messages: preparedMessages,
     };
     setActiveId(conversationId);
+    setConversations((prev) => {
+      const existed = prev.some((conversation) => conversation.id === conversationId);
+      if (!existed) {
+        return [
+          {
+            id: conversationId,
+            title: content.slice(0, 18) || '新实时会话',
+            status: 'running',
+            updatedAt: Date.now(),
+          },
+          ...prev,
+        ];
+      }
+      return prev.map((conversation) =>
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              title: deriveConversationTitle(next, conversation.title),
+              status: 'running',
+              updatedAt: Date.now(),
+            }
+          : conversation,
+      );
+    });
     setState(next);
     setConversationStates((prev) => ({
       ...prev,
@@ -260,6 +398,14 @@ export function ChatAssistantPage() {
     setInput('');
     const controller = new AbortController();
     abortRef.current = controller;
+    let pausedForOaLogin = false;
+    activeRunRef.current = {
+      content,
+      conversationId,
+      authContext,
+      appendUserMessage: false,
+      retryExistingUser: true,
+    };
     setIsBackendRunning(true);
     try {
       await runAgentSse(
@@ -280,14 +426,31 @@ export function ChatAssistantPage() {
             },
           ],
           forwardedProps: {
-            agentId: 'oa-agent',
-            sessionId: threadId,
-            traceId: `trace-web-${Date.now()}`,
+            agentId: AGENT_ID,
+            traceId: authContext.traceId,
+            threadId: authContext.threadId,
             runtime: 'ag-ui-web',
           },
         },
         (event) => {
           setState((prev) => aguiEventReducer(prev, event));
+          if (isOaLoginRequiredEvent(event)) {
+            pausedForOaLogin = true;
+            const value = asRecord(event.value);
+            const loginContext = authContextFromLoginEvent(event, authContext);
+            queueOaLogin(
+              {
+                content,
+                conversationId,
+                authContext: loginContext,
+                appendUserMessage: false,
+                retryExistingUser: true,
+                loginEndpoint: textValue(value.loginEndpoint, '/api/agent/oa/login'),
+              },
+              textValue(value.message, '当前会话没有 OA 令牌，请先登录'),
+            );
+            controller.abort();
+          }
         },
         controller.signal,
       );
@@ -303,14 +466,89 @@ export function ChatAssistantPage() {
             runId: prev.runId,
           }),
         );
-        toast.error('后端连接失败，请确认 agent-platform 已启动在 8080');
+        toast.error('后端连接失败，请确认 agent-platform 已启动在 8081');
       }
     } finally {
       if (abortRef.current === controller) {
         abortRef.current = null;
       }
+      if (!pausedForOaLogin && activeRunRef.current?.authContext.runId === runId) {
+        activeRunRef.current = null;
+      }
       setIsBackendRunning(false);
     }
+  };
+
+  const submitMessage = (value: string) => {
+    void startBackendRun(value);
+  };
+
+  const handleOaLogin = async (values: OaLoginValues) => {
+    if (!pendingRun && !oaAuthContext) return;
+    const authContext = pendingRun?.authContext ?? oaAuthContext;
+    if (!authContext) return;
+    setOaLoginLoading(true);
+    try {
+      const session = await loginOa(
+        {
+          ...values,
+          authContext,
+        },
+        pendingRun?.loginEndpoint,
+      );
+      setOaSession(session);
+      if (!session.authenticated) {
+        toast.error(session.message || 'OA 登录失败');
+        return;
+      }
+      toast.success('OA 登录成功');
+      setOaLoginOpen(false);
+      setOaLoginMessage('');
+      const run = pendingRun;
+      setPendingRun(null);
+      if (run) {
+        await startBackendRun(run.content, {
+          conversationId: run.conversationId,
+          appendUserMessage: run.appendUserMessage,
+          retryExistingUser: run.retryExistingUser,
+          authContext: run.authContext,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'OA 登录失败';
+      toast.error(message);
+    } finally {
+      setOaLoginLoading(false);
+    }
+  };
+
+  const handleOaLogout = async () => {
+    const authContext = oaAuthContext ?? (isLiveConversationId(activeId) ? buildOaAuthContext(activeId) : undefined);
+    if (!authContext) return;
+    try {
+      const session = await logoutOa(authContext);
+      setOaSession(session);
+      setPendingRun(null);
+      setOaLoginMessage('');
+      toast.success('OA 登录态已退出');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'OA 退出失败';
+      toast.error(message);
+    }
+  };
+
+  const cancelOaLogin = () => {
+    setOaLoginOpen(false);
+    toast.warning('已取消 OA 登录，可在消息卡片中再次点击授权');
+  };
+
+  const handleAssistantAction = (action: ActionItem) => {
+    if (action.name !== 'oa.login') return;
+    if (pendingRun) {
+      openOaLogin(pendingRun, oaLoginMessage || '当前会话没有 OA 令牌，请先登录');
+      return;
+    }
+    toast.warning('这次授权请求已过期，请重新发送当前任务');
   };
 
   const handleA2UIAction = (payload: A2UIActionPayload) => {
@@ -341,7 +579,8 @@ export function ChatAssistantPage() {
   };
 
   return (
-    <ChatShell
+    <>
+      <ChatShell
       sidebar={
         <ConversationSidebar
           conversations={conversations}
@@ -360,12 +599,25 @@ export function ChatAssistantPage() {
                 <Tag color="green">Ant Design X</Tag>
                 <Tag color="blue">AG-UI</Tag>
                 <Tag color="orange">A2UI</Tag>
+                <Tag color={oaSession?.authenticated ? 'green' : 'default'}>
+                  {oaSession?.authenticated ? `OA ${oaSession.username ?? '已登录'}` : 'OA 未登录'}
+                </Tag>
               </Space>
               <div className="header-subtitle">
                 <Text type="secondary">{activeDemo.description}</Text>
               </div>
             </div>
             <Space>
+              {oaSession?.authenticated ? (
+                <Button icon={<LogOut size={15} />} onClick={handleOaLogout}>
+                  退出 OA
+                </Button>
+              ) : null}
+              {pendingRun?.conversationId === activeId ? (
+                <Button icon={<KeyRound size={15} />} onClick={() => openOaLogin(pendingRun, oaLoginMessage || '当前会话没有 OA 令牌，请先登录')}>
+                  授权 OA
+                </Button>
+              ) : null}
               <Button icon={<Cable size={15} />} onClick={newConversation}>
                 后端实时会话
               </Button>
@@ -385,7 +637,12 @@ export function ChatAssistantPage() {
             </Space>
           </header>
           <section className="chat-transcript" ref={transcriptRef}>
-            <MessageList messages={state.messages} surfaces={state.surfaces} onA2UIAction={handleA2UIAction} />
+            <MessageList
+              messages={state.messages}
+              surfaces={state.surfaces}
+              onA2UIAction={handleA2UIAction}
+              onAssistantAction={handleAssistantAction}
+            />
           </section>
           <SenderBar
             value={input}
@@ -398,6 +655,16 @@ export function ChatAssistantPage() {
         </>
       }
       inspector={<RightInspector state={state} demo={activeDemo} onReplay={() => replayDemo()} />}
-    />
+      />
+      <OaLoginModal
+        open={oaLoginOpen}
+        loading={oaLoginLoading}
+        authContext={oaAuthContext}
+        session={oaSession}
+        message={oaLoginMessage}
+        onCancel={cancelOaLogin}
+        onLogin={handleOaLogin}
+      />
+    </>
   );
 }

@@ -8,6 +8,14 @@ const { Paragraph, Text } = Typography;
 
 const JsonView = ({ value }: { value: unknown }) => <pre className="inspector-json">{JSON.stringify(value, null, 2)}</pre>;
 
+const runtimeBadgeStatus = (status: ChatRuntimeState['status']) => {
+  if (status === 'error') return 'error';
+  if (status === 'running') return 'processing';
+  if (status === 'waiting_auth') return 'warning';
+  if (status === 'idle') return 'default';
+  return 'success';
+};
+
 export function RightInspector({
   state,
   demo,
@@ -43,7 +51,7 @@ export function RightInspector({
             key: 'runtime',
             label: '状态',
             children: (
-              <Space orientation="vertical" size={12} className="fill">
+              <Space direction="vertical" size={12} className="fill">
                 <Descriptions
                   size="small"
                   column={1}
@@ -54,7 +62,7 @@ export function RightInspector({
                     {
                       key: 'status',
                       label: '状态',
-                      children: <Badge status={state.status === 'error' ? 'error' : state.status === 'running' ? 'processing' : 'success'} text={state.status} />,
+                      children: <Badge status={runtimeBadgeStatus(state.status)} text={state.status === 'waiting_auth' ? '待授权' : state.status} />,
                     },
                   ]}
                 />
@@ -99,7 +107,7 @@ export function RightInspector({
             key: 'surfaces',
             label: 'A2UI',
             children: (
-              <Space orientation="vertical" size={10} className="fill">
+              <Space direction="vertical" size={10} className="fill">
                 <Alert type="success" showIcon title="Catalog 白名单" description={`${assistantCatalog.length} 个组件已注册`} />
                 {surfaces.map((surface) => (
                   <div className="surface-mini" key={surface.surfaceId}>

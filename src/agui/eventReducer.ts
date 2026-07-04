@@ -125,6 +125,37 @@ const appendThought = (message: AssistantMessage, item: ThoughtChainItem) => {
   return { ...message, blocks };
 };
 
+const toolDisplayName = (name: string) => {
+  const names: Record<string, string> = {
+    getMyWorkItems: '查询我的工作项',
+    getWorkItemDetail: '查询工作项详情',
+    generateDailyReportDraft: '生成日报草稿',
+    submitDailyReport: '提交日报',
+    queryDailyReportStatus: '查询日报状态',
+  };
+  return names[name] ?? name;
+};
+
+const appendToolReasoning = (message: AssistantMessage, toolCall: ToolCallState) => {
+  let next = message;
+  const hasModelExplanation = next.blocks.some((block) => block.type === 'markdown' || block.type === 'reasoning');
+  if (!hasModelExplanation) {
+    next = appendBlock(next, {
+      type: 'reasoning',
+      title: 'ReAct 推理',
+      content: `我需要先获取真实业务数据，再继续完成用户请求。下一步调用工具：${toolDisplayName(toolCall.name)}。`,
+      status: 'done',
+    });
+  }
+  return appendThought(next, {
+    key: `tool-${toolCall.id}`,
+    title: `调用工具：${toolDisplayName(toolCall.name)}`,
+    description: '通过 Enterprise Tool Gateway 访问真实 OA 能力。',
+    status: 'running',
+    timestamp: toolCall.startedAt,
+  });
+};
+
 const appendToolBlock = (message: AssistantMessage, toolCall: ToolCallState) => {
   const blocks = message.blocks.filter(
     (block) => !(block.type === 'toolResult' && block.toolName === toolCall.name && toolCall.status !== 'running'),
@@ -152,9 +183,31 @@ const parseToolResult = (content: unknown) => {
   }
 };
 
+const toolResultFailed = (result: unknown) =>
+  Boolean(
+    result
+      && typeof result === 'object'
+      && 'success' in result
+      && (result as { success?: unknown }).success === false,
+  );
+
+const toolResultMessage = (result: unknown) => {
+  if (!result || typeof result !== 'object') return '';
+  const value = result as Record<string, unknown>;
+  return value.message ? String(value.message) : '';
+};
+
 const deltaText = (event: AguiEvent) => (typeof event.delta === 'string' ? event.delta : '');
 
 const customValue = <T,>(event: AguiEvent): T => (event.value ?? {}) as T;
+
+const stringList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return value === undefined || value === null || String(value).trim() === '' ? [] : [String(value)];
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+};
+
+const validationDescription = (messages: string[]) =>
+  messages.length ? messages.map((message) => `- ${message}`).join('\n') : '请补充必要信息后重新生成日报草稿。';
 
 const appendA2UIBlock = (state: ChatRuntimeState, messageId: string, surfaceId: string, commands?: A2UICommand[]) =>
   upsertAssistantMessage(state, messageId, (message) => {
@@ -190,12 +243,16 @@ const mapOACustomEvent = (state: ChatRuntimeState, event: AguiEvent): ChatRuntim
     };
   }
   if (event.name === 'oa.daily_report_draft') {
+    const validationErrors = stringList(value.validationErrors ?? value.validationWarnings);
+    const content = String(value.content ?? '');
     const next = upsertAssistantMessage(state, messageId, (message) =>
       appendBlock(message, {
         type: 'alert',
-        level: 'warning',
-        message: '日报草稿等待确认',
-        description: String(value.content ?? ''),
+        level: validationErrors.length ? 'error' : 'warning',
+        message: validationErrors.length ? '日报草稿未通过提交前校验' : '日报草稿等待确认',
+        description: validationErrors.length
+          ? `${content}\n\n提交前校验：\n${validationDescription(validationErrors)}`
+          : content,
       }),
     );
     return {
@@ -204,10 +261,44 @@ const mapOACustomEvent = (state: ChatRuntimeState, event: AguiEvent): ChatRuntim
         draftId: value.draftId,
         draftVersion: value.draftVersion ?? 1,
         content: value.content,
-        requiresConfirmation: value.requiresConfirmation ?? true,
+        requiresConfirmation: value.requiresConfirmation ?? (validationErrors.length === 0),
+        submitReady: value.submitReady ?? (validationErrors.length === 0),
+        validationErrors,
+        validationWarnings: stringList(value.validationWarnings),
         confirmationAction: value.confirmationAction,
         idempotencyKey: value.idempotencyKey,
-        mock: value.mock ?? true,
+        mock: value.mock ?? (value.source === 'mock'),
+      }),
+    };
+  }
+  if (event.name === 'oa.daily_report_validation_failed') {
+    const validationErrors = stringList(value.validationErrors);
+    const next = upsertAssistantMessage(state, messageId, (message) =>
+      appendBlock(
+        appendThought({ ...message, status: 'error' }, {
+          key: 'daily-report-validation-failed',
+          title: '提交前校验未通过',
+          description: validationErrors.join('；') || String(value.message ?? '日报草稿缺少必要信息。'),
+          status: 'error',
+          timestamp: event.timestamp,
+        }),
+        {
+          type: 'alert',
+          level: 'error',
+          message: String(value.message ?? '日报草稿未通过提交前校验'),
+          description: validationDescription(validationErrors),
+        },
+      ),
+    );
+    return {
+      ...next,
+      status: 'error',
+      sharedState: setByPath(setByPath(next.sharedState, '/pendingConfirmation', undefined), '/lastValidationError', {
+        errorCode: value.errorCode ?? 'DAILY_REPORT_VALIDATION_FAILED',
+        message: value.message,
+        validationErrors,
+        draftId: value.draftId,
+        draftVersion: value.draftVersion,
       }),
     };
   }
@@ -215,6 +306,47 @@ const mapOACustomEvent = (state: ChatRuntimeState, event: AguiEvent): ChatRuntim
     return {
       ...state,
       sharedState: setByPath(state.sharedState, '/pendingConfirmation', value),
+    };
+  }
+  if (event.name === 'oa.login_required') {
+    const next = upsertAssistantMessage(state, messageId, (message) =>
+      appendBlock(
+        appendThought({ ...message, status: 'interrupted' }, {
+          key: 'oa-login-required',
+          title: '等待用户授权',
+          description: 'OA 工具需要当前浏览器完成登录授权后才能继续。',
+          status: 'pending',
+          timestamp: event.timestamp,
+        }),
+        {
+          type: 'alert',
+          level: 'warning',
+          message: '需要 OA 授权',
+          description: String(value.message ?? '当前浏览器没有 OA 令牌，请点击下方按钮完成授权。取消后也可以再次点击授权。'),
+        },
+      ),
+    );
+    const withAction = upsertAssistantMessage(next, messageId, (message) =>
+      appendBlock(message, {
+        type: 'actions',
+        items: [
+          {
+            name: 'oa.login',
+            label: '授权登录 OA',
+            type: 'primary',
+            context: {
+              authContext: value.authContext,
+              loginEndpoint: value.loginEndpoint,
+              message: value.message,
+            },
+          },
+        ],
+      }),
+    );
+    return {
+      ...withAction,
+      status: 'waiting_auth',
+      sharedState: setByPath(withAction.sharedState, '/pendingOaLogin', value),
     };
   }
   if (event.name === 'oa.daily_report_submit_result') {
@@ -257,9 +389,11 @@ export const aguiEventReducer = (state: ChatRuntimeState, event: AguiEvent): Cha
     case 'RUN_FINISHED':
       return {
         ...next,
-        status: 'completed',
+        status: next.status === 'error' || next.status === 'waiting_auth' ? next.status : 'completed',
         messages: next.messages.map((message) =>
-          isAssistant(message) ? { ...message, status: 'completed' } : message,
+          isAssistant(message) && message.status !== 'error' && message.status !== 'interrupted'
+            ? { ...message, status: 'completed' }
+            : message,
         ),
       };
     case 'RUN_ERROR': {
@@ -351,7 +485,7 @@ export const aguiEventReducer = (state: ChatRuntimeState, event: AguiEvent): Cha
         toolCalls: { ...next.toolCalls, [toolCallId]: toolCall },
       };
       const targetMessageId = toolCall.parentMessageId ?? next.currentAssistantMessageId ?? `assistant-${next.eventLog.length}`;
-      return upsertAssistantMessage(next, targetMessageId, (message) => appendToolBlock(message, toolCall));
+      return upsertAssistantMessage(next, targetMessageId, (message) => appendToolBlock(appendToolReasoning(message, toolCall), toolCall));
     }
     case 'TOOL_CALL_ARGS': {
       const toolCallId = toolCallIdOf(event) ?? '';
@@ -394,10 +528,11 @@ export const aguiEventReducer = (state: ChatRuntimeState, event: AguiEvent): Cha
         status: 'finished',
       };
       const result = parseToolResult(event.content ?? event.result);
+      const failed = toolResultFailed(result);
       const updated: ToolCallState = {
         ...current,
         result,
-        status: 'success',
+        status: failed ? 'error' : 'success',
         finishedAt: now(),
       };
       next = {
@@ -405,7 +540,18 @@ export const aguiEventReducer = (state: ChatRuntimeState, event: AguiEvent): Cha
         toolCalls: { ...next.toolCalls, [toolCallId]: updated },
       };
       const targetMessageId = parentMessageIdOf(event) ?? current.parentMessageId ?? next.currentAssistantMessageId ?? messageIdOf(event) ?? `assistant-${next.eventLog.length}`;
-      return upsertAssistantMessage(next, targetMessageId, (message) => appendToolBlock(message, updated));
+      return upsertAssistantMessage(next, targetMessageId, (message) =>
+        appendToolBlock(
+          appendThought(message, {
+            key: `tool-${updated.id}`,
+            title: `工具结果：${toolDisplayName(updated.name)}`,
+            description: failed ? toolResultMessage(result) || '工具需要补充授权或返回了业务错误。' : '工具已返回真实业务数据，继续生成回答。',
+            status: failed ? 'error' : 'success',
+            timestamp: updated.finishedAt,
+          }),
+          updated,
+        ),
+      );
     }
     case 'STATE_SNAPSHOT':
       return {

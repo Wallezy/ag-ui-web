@@ -153,7 +153,7 @@ export type ActivityState = {
 export type ChatRuntimeState = {
   threadId: string;
   runId?: string;
-  status: 'idle' | 'running' | 'completed' | 'error';
+  status: 'idle' | 'running' | 'completed' | 'error' | 'waiting_auth';
   messages: ChatMessage[];
   toolCalls: Record<string, ToolCallState>;
   activities: Record<string, ActivityState>;

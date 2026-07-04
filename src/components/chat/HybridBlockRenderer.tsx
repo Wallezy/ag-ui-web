@@ -1,6 +1,6 @@
 import { Alert, Button, Image, Space, Steps, Table, Tag, Timeline } from 'antd';
 import { A2UISurfaceBlock, type A2UIActionPayload } from '../../a2ui/renderer';
-import type { A2UISurfaceState, AssistantBlock } from '../../agui/eventTypes';
+import type { A2UISurfaceState, ActionItem, AssistantBlock } from '../../agui/eventTypes';
 import { CodeBlock } from '../blocks/CodeBlock';
 import { FileCardBlock } from '../blocks/FileCardBlock';
 import { MarkdownBlock } from '../blocks/MarkdownBlock';
@@ -13,10 +13,12 @@ export function HybridBlockRenderer({
   block,
   surfaces,
   onA2UIAction,
+  onAssistantAction,
 }: {
   block: AssistantBlock;
   surfaces: Record<string, A2UISurfaceState>;
   onA2UIAction?: (payload: A2UIActionPayload) => void;
+  onAssistantAction?: (action: ActionItem) => void;
 }) {
   switch (block.type) {
     case 'markdown':
@@ -85,7 +87,13 @@ export function HybridBlockRenderer({
       return (
         <Space wrap>
           {block.items.map((item) => (
-            <Button key={item.name} size="small" type={item.type} danger={item.danger}>
+            <Button
+              key={item.name}
+              size="small"
+              type={item.type}
+              danger={item.danger}
+              onClick={() => onAssistantAction?.(item)}
+            >
               {item.label}
             </Button>
           ))}
