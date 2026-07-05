@@ -5,6 +5,14 @@ import type { A2UIActionPayload } from '../a2ui/renderer';
 import type { ActionItem, AguiEvent, AssistantMessage, ChatMessage, ChatRuntimeState, DemoScenario } from '../agui/eventTypes';
 import { aguiEventReducer, createInitialRuntimeState, reduceAguiEvents, withUserQuestion } from '../agui/eventReducer';
 import { runAgentSse } from '../agui/aguiClient';
+import {
+  createCloudConversation,
+  getCloudConversation,
+  isConversationApiUnavailable,
+  listCloudConversations,
+  type CloudConversationDetail,
+  type CloudConversationSummary,
+} from '../agui/conversationClient';
 import { demoScenarios, getDemoById } from '../data/demos';
 import { ChatShell } from '../components/layout/ChatShell';
 import { ConversationSidebar, type ConversationSummary } from '../components/layout/ConversationSidebar';
@@ -26,7 +34,6 @@ const assistantText = (message: AssistantMessage) =>
     .flatMap((block) => {
       if (block.type === 'markdown') return block.content;
       if (block.type === 'alert') return `${block.message}${block.description ? `：${block.description}` : ''}`;
-      if (block.type === 'toolResult') return `工具 ${block.toolName} 返回：${JSON.stringify(block.result)}`;
       if (block.type === 'table') return `表格结果：${JSON.stringify(block.dataSource).slice(0, 1200)}`;
       return [];
     })
@@ -52,10 +59,10 @@ const liveScenario: DemoScenario = {
   title: '后端实时会话',
   group: '联调',
   question: '连接 agent-platform 后端。',
-  description: '输入区已接入 /api/agent/ag-ui，后端 SSE 事件会实时驱动消息、工具、状态和业务卡片。',
-  blockOrder: ['User Message', 'AG-UI SSE', 'Reducer', 'Hybrid Blocks', 'Inspector'],
-  visualEffect: '后端返回什么 AG-UI 事件，前端就按协议增量渲染。',
-  interactions: ['发送消息', '停止运行', '查看事件流'],
+  description: '输入任务后会实时展示业务进度、OA 授权、校验结果和业务卡片。',
+  blockOrder: ['用户需求', '意图判断', 'OA 数据读取', '草稿生成', '页面确认'],
+  visualEffect: '主聊天区展示业务进度；右侧保留运行状态用于联调排查。',
+  interactions: ['发送消息', '停止运行', '查看业务状态'],
   recovery: '后端未启动或 SSE 失败时会渲染 RUN_ERROR，并保留用户消息。',
   events: [],
 };
@@ -103,6 +110,35 @@ const createLiveConversationState = (threadId: string): ChatRuntimeState => ({
   ],
 });
 
+const cloudConversationToSummary = (conversation: CloudConversationSummary): ConversationSummary => ({
+  id: conversation.id,
+  title: conversation.title,
+  status: conversation.status,
+  updatedAt: conversation.updatedAt,
+});
+
+const restoreCloudConversationState = (detail: CloudConversationDetail): ChatRuntimeState =>
+  detail.timeline.reduce((next, entry) => {
+    if (entry.kind === 'user_message' && entry.message) {
+      return {
+        ...next,
+        messages: [
+          ...next.messages,
+          {
+            id: entry.message.id,
+            role: 'user' as const,
+            content: entry.message.content,
+            createdAt: entry.message.createdAt,
+          },
+        ],
+      };
+    }
+    if (entry.kind === 'agui_event' && entry.event) {
+      return aguiEventReducer(next, entry.event);
+    }
+    return next;
+  }, createLiveConversationState(detail.summary.id));
+
 const deriveConversationTitle = (chatState: ChatRuntimeState, fallback: string) => {
   const firstUser = chatState.messages.find((message) => message.role === 'user');
   if (firstUser?.role === 'user' && firstUser.content.trim()) {
@@ -130,10 +166,48 @@ export function ChatAssistantPage() {
   const [oaAuthContext, setOaAuthContext] = useState<OaAuthContext>();
   const [oaSession, setOaSession] = useState<OaSessionStatus | null>(null);
   const [pendingRun, setPendingRun] = useState<PendingAgentRun | null>(null);
+  const [isCloudLoading, setIsCloudLoading] = useState(false);
   const replayTimer = useRef<number | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const activeRunRef = useRef<PendingAgentRun | null>(null);
   const transcriptRef = useRef<HTMLElement | null>(null);
+
+  const loadCloudConversationState = async (conversationId: string, activate = true) => {
+    const detail = await getCloudConversation(conversationId);
+    const restored = restoreCloudConversationState(detail);
+    setConversationStates((prev) => ({
+      ...prev,
+      [conversationId]: restored,
+    }));
+    setConversations((prev) => {
+      const summary = cloudConversationToSummary(detail.summary);
+      const rest = prev.filter((conversation) => conversation.id !== conversationId);
+      return [summary, ...rest].sort((left, right) => right.updatedAt - left.updatedAt);
+    });
+    if (activate) {
+      setActiveId(conversationId);
+      setState(restored);
+    }
+    return restored;
+  };
+
+  const refreshCloudConversations = async (activateLatest = false) => {
+    setIsCloudLoading(true);
+    try {
+      const response = await listCloudConversations();
+      const summaries = response.conversations.map(cloudConversationToSummary);
+      setConversations(summaries);
+      if (activateLatest && summaries.length) {
+        await loadCloudConversationState(summaries[0].id, true);
+      }
+    } catch (error) {
+      if (isConversationApiUnavailable(error)) return;
+      const message = error instanceof Error ? error.message : '云端会话加载失败';
+      toast.warning(message);
+    } finally {
+      setIsCloudLoading(false);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -141,6 +215,10 @@ export function ChatAssistantPage() {
       abortRef.current?.abort();
       activeRunRef.current = null;
     };
+  }, []);
+
+  useEffect(() => {
+    void refreshCloudConversations(true);
   }, []);
 
   useEffect(() => {
@@ -195,7 +273,7 @@ export function ChatAssistantPage() {
     threadId: textValue(override?.threadId, threadId),
     userId: optionalText(override?.userId),
     tenantId: optionalText(override?.tenantId),
-    sessionId: optionalText(override?.sessionId),
+    sessionId: textValue(override?.sessionId, threadId),
     runId: textValue(override?.runId, runId ?? ''),
     traceId: textValue(override?.traceId, traceId ?? ''),
   });
@@ -271,6 +349,11 @@ export function ChatAssistantPage() {
       if (saved) {
         setActiveId(id);
         setState(saved);
+      } else {
+        void loadCloudConversationState(id, true).catch((error) => {
+          const message = error instanceof Error ? error.message : '云端会话加载失败';
+          toast.error(message);
+        });
       }
       return;
     }
@@ -299,6 +382,16 @@ export function ChatAssistantPage() {
       [threadId]: next,
     }));
     setState(next);
+    void createCloudConversation({ conversationId: threadId, title: '新实时会话' })
+      .then((response) => {
+        const summary = cloudConversationToSummary(response.conversation);
+        setConversations((prev) => [summary, ...prev.filter((conversation) => conversation.id !== summary.id)]);
+      })
+      .catch((error) => {
+        if (isConversationApiUnavailable(error)) return;
+        const message = error instanceof Error ? error.message : '云端会话创建失败';
+        toast.warning(message);
+      });
   };
 
   const startBackendRun = async (
@@ -504,6 +597,7 @@ export function ChatAssistantPage() {
       toast.success('OA 登录成功');
       setOaLoginOpen(false);
       setOaLoginMessage('');
+      await refreshCloudConversations(false);
       const run = pendingRun;
       setPendingRun(null);
       if (run) {
@@ -530,6 +624,7 @@ export function ChatAssistantPage() {
       setOaSession(session);
       setPendingRun(null);
       setOaLoginMessage('');
+      await refreshCloudConversations(false);
       toast.success('OA 登录态已退出');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'OA 退出失败';
@@ -602,6 +697,7 @@ export function ChatAssistantPage() {
                 <Tag color={oaSession?.authenticated ? 'green' : 'default'}>
                   {oaSession?.authenticated ? `OA ${oaSession.username ?? '已登录'}` : 'OA 未登录'}
                 </Tag>
+                {isCloudLoading ? <Tag color="processing">云端同步中</Tag> : null}
               </Space>
               <div className="header-subtitle">
                 <Text type="secondary">{activeDemo.description}</Text>

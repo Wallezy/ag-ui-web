@@ -66,7 +66,7 @@ export function RightInspector({
                     },
                   ]}
                 />
-                <Alert type="info" showIcon title="Block 编排" description={demo.blockOrder.join(' → ')} />
+                <Alert type="info" showIcon title="处理链路" description={demo.blockOrder.join(' → ')} />
                 <div className="workflow-card">
                   <Text strong>工作流状态</Text>
                   <Steps

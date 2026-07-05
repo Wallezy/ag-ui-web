@@ -18,8 +18,6 @@ const finishOrWait = (finished: boolean, waitingForPrevious: boolean): WorkflowS
 };
 
 export function deriveWorkflowSteps(state: ChatRuntimeState): WorkflowStep[] {
-  const toolCalls = Object.values(state.toolCalls);
-  const toolNames = toolCalls.map((tool) => tool.name).filter(Boolean);
   const hasRunStarted = hasEvent(state, 'RUN_STARTED');
   const hasRunFinished = hasEvent(state, 'RUN_FINISHED');
   const hasRunError = hasEvent(state, 'RUN_ERROR') || state.status === 'error';
@@ -36,44 +34,44 @@ export function deriveWorkflowSteps(state: ChatRuntimeState): WorkflowStep[] {
   return [
     {
       key: 'run-started',
-      title: '运行启动',
-      description: hasRunStarted ? `Thread ${state.threadId} / Run ${state.runId ?? '-'}` : '等待 RUN_STARTED',
+      title: '开始处理',
+      description: hasRunStarted ? '已接收用户需求，正在组织处理流程。' : '等待开始处理',
       status: hasRunError ? 'finish' : finishOrWait(hasRunStarted, false),
     },
     {
       key: 'tool-selected',
-      title: '工具选择',
-      description: hasToolStart ? `已选择 ${toolNames.join('、') || '工具'}，共 ${eventCount(state, 'TOOL_CALL_START')} 次调用` : '等待工具调用或直接文本回答',
+      title: '业务数据准备',
+      description: hasToolStart ? `已开始处理 OA 业务数据，共 ${eventCount(state, 'TOOL_CALL_START')} 次请求。` : '等待业务数据处理或直接回复',
       status: hasRunError && !hasToolStart ? 'error' : finishOrWait(hasToolStart, !hasRunStarted),
     },
     {
       key: 'tool-args',
-      title: '参数流',
-      description: hasToolArgs ? `已接收 ${eventCount(state, 'TOOL_CALL_ARGS')} 个参数片段` : '等待 TOOL_CALL_ARGS',
+      title: '参数准备',
+      description: hasToolArgs ? '已完成业务请求参数整理。' : '等待参数准备',
       status: hasToolEnd ? 'finish' : hasToolArgs ? 'process' : hasToolStart ? 'process' : 'wait',
     },
     {
       key: 'tool-result',
-      title: '工具结果',
-      description: hasToolResult ? `已返回 ${eventCount(state, 'TOOL_CALL_RESULT')} 个 Tool Result` : '等待业务工具返回',
+      title: '业务数据响应',
+      description: hasToolResult ? `已收到 ${eventCount(state, 'TOOL_CALL_RESULT')} 个业务响应。` : '等待 OA 业务响应',
       status: hasRunError && !hasToolResult ? 'error' : finishOrWait(hasToolResult, !hasToolEnd),
     },
     {
       key: 'business-ui',
       title: '业务卡片',
-      description: hasCustom || hasA2UI ? `已处理 ${eventCount(state, 'CUSTOM')} 个 CUSTOM 事件，${Object.keys(state.surfaces).length} 个 A2UI Surface` : '等待 OA 卡片或 A2UI 命令',
+      description: hasCustom || hasA2UI ? '已生成授权、校验、草稿或结果卡片。' : '等待 OA 业务卡片',
       status: hasCustom || hasA2UI ? 'finish' : hasToolResult ? 'process' : 'wait',
     },
     {
       key: 'text-stream',
-      title: '文本生成',
-      description: hasTextContent ? `已接收 ${eventCount(state, 'TEXT_MESSAGE_CONTENT') + eventCount(state, 'TEXT_MESSAGE_CHUNK')} 个文本片段` : '等待 TEXT_MESSAGE_CONTENT',
+      title: '回复整理',
+      description: hasTextContent ? '正在整理面向用户的回复。' : '等待回复整理',
       status: hasTextEnd ? 'finish' : hasTextStart || hasTextContent ? 'process' : 'wait',
     },
     {
       key: 'run-finished',
-      title: '运行结束',
-      description: hasRunError ? '运行异常，已进入错误恢复路径' : hasRunFinished ? 'RUN_FINISHED 已收到' : '等待 RUN_FINISHED',
+      title: '处理完成',
+      description: hasRunError ? '处理异常，已进入错误恢复路径。' : hasRunFinished ? '本轮处理已结束。' : '等待处理完成',
       status: hasRunError ? 'error' : hasRunFinished || state.status === 'completed' ? 'finish' : hasRunStarted ? 'process' : 'wait',
     },
   ];

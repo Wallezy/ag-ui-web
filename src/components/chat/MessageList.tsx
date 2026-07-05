@@ -1,8 +1,9 @@
+import type { ReactNode } from 'react';
 import { Avatar, Space, Tag, Typography } from 'antd';
 import { Bubble } from '@ant-design/x';
 import { Bot, UserRound } from 'lucide-react';
 import type { A2UIActionPayload } from '../../a2ui/renderer';
-import type { A2UISurfaceState, ActionItem, ChatMessage } from '../../agui/eventTypes';
+import type { A2UISurfaceState, ActionItem, AssistantBlock, ChatMessage } from '../../agui/eventTypes';
 import { HybridBlockRenderer } from './HybridBlockRenderer';
 
 const { Text } = Typography;
@@ -21,6 +22,28 @@ const assistantStatusText = {
   interrupted: '待授权',
 } as const;
 
+const isInternalThoughtTitle = (title: string) =>
+  title.startsWith('调用工具') || title.startsWith('工具结果') || title.includes('load_skill');
+
+const userFacingBlocks = (blocks: AssistantBlock[]): AssistantBlock[] =>
+  blocks.reduce<AssistantBlock[]>((visible, block) => {
+    if (block.type === 'reasoning' || block.type === 'toolResult') return visible;
+    if (block.type !== 'thoughtChain') {
+      visible.push(block);
+      return visible;
+    }
+    const items = block.items.filter((item) => !isInternalThoughtTitle(item.title));
+    if (items.length) visible.push({ ...block, items });
+    return visible;
+  }, []);
+
+type BubbleItem = {
+  key: string;
+  role: 'user' | 'system' | 'ai';
+  header?: ReactNode;
+  content: ReactNode;
+};
+
 export function MessageList({
   messages,
   surfaces,
@@ -32,22 +55,26 @@ export function MessageList({
   onA2UIAction?: (payload: A2UIActionPayload) => void;
   onAssistantAction?: (action: ActionItem) => void;
 }) {
-  const items = messages.map((message) => {
+  const items = messages.reduce<BubbleItem[]>((visible, message) => {
     if (message.role === 'user') {
-      return {
+      visible.push({
         key: message.id,
         role: 'user',
         content: <div className="user-message">{message.content}</div>,
-      };
+      });
+      return visible;
     }
     if (message.role === 'system') {
-      return {
+      visible.push({
         key: message.id,
         role: 'system',
         content: message.content,
-      };
+      });
+      return visible;
     }
-    return {
+    const blocks = userFacingBlocks(message.blocks);
+    if (!blocks.length) return visible;
+    visible.push({
       key: message.id,
       role: 'ai',
       header: (
@@ -60,7 +87,7 @@ export function MessageList({
       ),
       content: (
         <div className="assistant-message">
-          {message.blocks.map((block, index) => (
+          {blocks.map((block, index) => (
             <HybridBlockRenderer
               key={`${message.id}-${index}`}
               block={block}
@@ -71,8 +98,9 @@ export function MessageList({
           ))}
         </div>
       ),
-    };
-  });
+    });
+    return visible;
+  }, []);
 
   return (
     <Bubble.List

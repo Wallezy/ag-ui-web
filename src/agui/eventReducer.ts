@@ -125,48 +125,50 @@ const appendThought = (message: AssistantMessage, item: ThoughtChainItem) => {
   return { ...message, blocks };
 };
 
-const toolDisplayName = (name: string) => {
-  const names: Record<string, string> = {
-    getMyWorkItems: '查询我的工作项',
-    getWorkItemDetail: '查询工作项详情',
-    generateDailyReportDraft: '生成日报草稿',
-    submitDailyReport: '提交日报',
-    queryDailyReportStatus: '查询日报状态',
-  };
-  return names[name] ?? name;
+const toolProgressCopy: Record<string, { title: string; running: string; success: string; error: string }> = {
+  getMyWorkItems: {
+    title: '查询 OA 工作项',
+    running: '正在读取当前 OA 登录用户可见的任务、需求和缺陷。',
+    success: '已获取工作项数据，继续整理日报上下文。',
+    error: '工作项查询未完成，请按页面提示完成授权或补充条件。',
+  },
+  getWorkItemDetail: {
+    title: '查询工作项详情',
+    running: '正在读取选中工作项的详细信息。',
+    success: '已获取工作项详情。',
+    error: '工作项详情查询未完成。',
+  },
+  generateDailyReportDraft: {
+    title: '生成日报草稿',
+    running: '正在基于真实工作项和工时记录生成日报草稿。',
+    success: '日报草稿已生成，正在进行提交前校验。',
+    error: '日报草稿生成未完成，请查看页面校验提示。',
+  },
+  queryDailyReportStatus: {
+    title: '查询日报状态',
+    running: '正在查询日报提交状态。',
+    success: '已获取日报状态。',
+    error: '日报状态查询未完成。',
+  },
 };
 
-const appendToolReasoning = (message: AssistantMessage, toolCall: ToolCallState) => {
-  let next = message;
-  const hasModelExplanation = next.blocks.some((block) => block.type === 'markdown' || block.type === 'reasoning');
-  if (!hasModelExplanation) {
-    next = appendBlock(next, {
-      type: 'reasoning',
-      title: 'ReAct 推理',
-      content: `我需要先获取真实业务数据，再继续完成用户请求。下一步调用工具：${toolDisplayName(toolCall.name)}。`,
-      status: 'done',
-    });
-  }
-  return appendThought(next, {
+const toolProgressOf = (name: string) => toolProgressCopy[name];
+
+const appendToolProgress = (
+  message: AssistantMessage,
+  toolCall: ToolCallState,
+  status: ThoughtChainItem['status'],
+) => {
+  const copy = toolProgressOf(toolCall.name);
+  if (!copy) return message;
+  const description = status === 'running' ? copy.running : status === 'error' ? copy.error : copy.success;
+  return appendThought(message, {
     key: `tool-${toolCall.id}`,
-    title: `调用工具：${toolDisplayName(toolCall.name)}`,
-    description: '通过 Enterprise Tool Gateway 访问真实 OA 能力。',
-    status: 'running',
-    timestamp: toolCall.startedAt,
+    title: copy.title,
+    description,
+    status,
+    timestamp: status === 'running' ? toolCall.startedAt : toolCall.finishedAt,
   });
-};
-
-const appendToolBlock = (message: AssistantMessage, toolCall: ToolCallState) => {
-  const blocks = message.blocks.filter(
-    (block) => !(block.type === 'toolResult' && block.toolName === toolCall.name && toolCall.status !== 'running'),
-  );
-  blocks.push({
-    type: 'toolResult',
-    toolName: toolCall.name,
-    result: toolCall.result ?? { args: toolCall.args || '{}', toolCallId: toolCall.id },
-    status: toolCall.status === 'error' ? 'error' : toolCall.status === 'success' ? 'success' : 'running',
-  });
-  return { ...message, blocks };
 };
 
 const appendBlock = (message: AssistantMessage, block: AssistantBlock) => ({
@@ -190,12 +192,6 @@ const toolResultFailed = (result: unknown) =>
       && 'success' in result
       && (result as { success?: unknown }).success === false,
   );
-
-const toolResultMessage = (result: unknown) => {
-  if (!result || typeof result !== 'object') return '';
-  const value = result as Record<string, unknown>;
-  return value.message ? String(value.message) : '';
-};
 
 const deltaText = (event: AguiEvent) => (typeof event.delta === 'string' ? event.delta : '');
 
@@ -455,15 +451,6 @@ export const aguiEventReducer = (state: ChatRuntimeState, event: AguiEvent): Cha
         content: event.value,
         updatedAt: now(),
       } as const;
-      const messageId = next.currentAssistantMessageId ?? `activity-message-${next.eventLog.length}`;
-      next = upsertAssistantMessage(next, messageId, (message) =>
-        appendThought(message, {
-          key: id,
-          title,
-          status,
-          timestamp: event.timestamp,
-        }),
-      );
       return {
         ...next,
         activities: { ...next.activities, [id]: activity },
@@ -485,7 +472,8 @@ export const aguiEventReducer = (state: ChatRuntimeState, event: AguiEvent): Cha
         toolCalls: { ...next.toolCalls, [toolCallId]: toolCall },
       };
       const targetMessageId = toolCall.parentMessageId ?? next.currentAssistantMessageId ?? `assistant-${next.eventLog.length}`;
-      return upsertAssistantMessage(next, targetMessageId, (message) => appendToolBlock(appendToolReasoning(message, toolCall), toolCall));
+      if (!toolProgressOf(toolCall.name)) return next;
+      return upsertAssistantMessage(next, targetMessageId, (message) => appendToolProgress(message, toolCall, 'running'));
     }
     case 'TOOL_CALL_ARGS': {
       const toolCallId = toolCallIdOf(event) ?? '';
@@ -540,17 +528,9 @@ export const aguiEventReducer = (state: ChatRuntimeState, event: AguiEvent): Cha
         toolCalls: { ...next.toolCalls, [toolCallId]: updated },
       };
       const targetMessageId = parentMessageIdOf(event) ?? current.parentMessageId ?? next.currentAssistantMessageId ?? messageIdOf(event) ?? `assistant-${next.eventLog.length}`;
+      if (!toolProgressOf(updated.name)) return next;
       return upsertAssistantMessage(next, targetMessageId, (message) =>
-        appendToolBlock(
-          appendThought(message, {
-            key: `tool-${updated.id}`,
-            title: `工具结果：${toolDisplayName(updated.name)}`,
-            description: failed ? toolResultMessage(result) || '工具需要补充授权或返回了业务错误。' : '工具已返回真实业务数据，继续生成回答。',
-            status: failed ? 'error' : 'success',
-            timestamp: updated.finishedAt,
-          }),
-          updated,
-        ),
+        appendToolProgress(message, updated, failed ? 'error' : 'success'),
       );
     }
     case 'STATE_SNAPSHOT':
