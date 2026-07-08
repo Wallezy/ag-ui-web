@@ -1,0 +1,7 @@
+*
+!dist/
+!dist/**
+!Dockerfile
+
+**/.DS_Store
+**/*.log
