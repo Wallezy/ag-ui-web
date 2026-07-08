@@ -10,6 +10,7 @@ default:
 
 variables:
   BUILD_BRANCH_NAME: "dev"
+  NODE_IMAGE: "node:22.13.0"
   PNPM_VERSION: "11.10.0"
 
 cache:
@@ -26,7 +27,7 @@ stages:
   - dingtalk
 
 install:
-  image: registry.cn-hangzhou.aliyuncs.com/rcmirrors/node:22
+  image: $NODE_IMAGE
   stage: install
   before_script:
     - npm config set registry=https://$NPM_REGISTRY_URL/
