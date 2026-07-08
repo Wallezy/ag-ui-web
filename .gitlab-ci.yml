@@ -29,11 +29,16 @@ install:
   image: registry.cn-hangzhou.aliyuncs.com/rcmirrors/node:22
   stage: install
   before_script:
-    - npm config set registry=https://$NPM_REGISTRY_URL/
-    - echo "//$NPM_REGISTRY_URL/:_authToken=$NPM_REGISTRY_TOKEN" >> ~/.npmrc
     - corepack enable
     - corepack prepare pnpm@$PNPM_VERSION --activate
-    - pnpm config set registry=https://$NPM_REGISTRY_URL/
+    - |
+      if [ -n "$NPM_REGISTRY_URL" ]; then
+        npm config set registry "https://$NPM_REGISTRY_URL/"
+        pnpm config set registry "https://$NPM_REGISTRY_URL/"
+        if [ -n "$NPM_REGISTRY_TOKEN" ]; then
+          echo "//$NPM_REGISTRY_URL/:_authToken=$NPM_REGISTRY_TOKEN" >> ~/.npmrc
+        fi
+      fi
     - pnpm config set store-dir .pnpm-store
     - node -v
     - pnpm -v
