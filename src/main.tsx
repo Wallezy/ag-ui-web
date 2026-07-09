@@ -11,6 +11,7 @@ import './styles/index.css'
 // Create a new router instance
 const router = createRouter({
   routeTree,
+  basepath: '/app',
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,
 })
