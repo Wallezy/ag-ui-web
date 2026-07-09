@@ -1420,37 +1420,18 @@ function WorkHourFillSheet({
           </SheetDescription>
         </SheetHeader>
 
-        <div className='grid min-h-0 flex-1 overflow-hidden md:grid-cols-[18rem_minmax(0,1fr)]'>
+        <div className='grid min-h-0 flex-1 overflow-hidden md:grid-cols-[24rem_minmax(0,1fr)]'>
           <ScrollArea className='min-h-0 border-b md:border-r md:border-b-0'>
             <div className='flex flex-col gap-2 p-4'>
               {fillableItems.map((item) => {
-                const selected = item.key === selectedItem?.key
                 const saved = savedKeys.has(item.key)
                 return (
-                  <button
+                  <WorkHourFillListItem
                     key={item.key}
-                    type='button'
-                    className={cn(
-                      'bg-background rounded-md border px-3 py-2 text-left transition-colors',
-                      selected
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:bg-muted/50'
-                    )}
-                    onClick={() => setSelectedKey(item.key)}
-                  >
-                    <div className='flex min-w-0 items-center gap-2'>
-                      <Badge variant='outline'>{item.typeName}</Badge>
-                      {saved ? <Badge variant='secondary'>已保存</Badge> : null}
-                    </div>
-                    <div className='mt-1 truncate text-sm font-medium'>
-                      {item.title || item.typeName + ' ' + item.id}
-                    </div>
-                    {item.projectTitle ? (
-                      <div className='text-muted-foreground mt-1 truncate text-xs'>
-                        {item.projectTitle}
-                      </div>
-                    ) : null}
-                  </button>
+                    item={item}
+                    saved={saved}
+                    onOpen={() => setSelectedKey(item.key)}
+                  />
                 )
               })}
             </div>
