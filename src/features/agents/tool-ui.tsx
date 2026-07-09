@@ -1194,68 +1194,128 @@ function WorkHourQuickActions({
 function WorkHourFillListItem({
   item,
   saved,
+  selected = false,
+  compact = false,
+  actionLabel = '去填写',
   onOpen,
 }: {
   item: MissingWorkHourItem
   saved: boolean
+  selected?: boolean
+  compact?: boolean
+  actionLabel?: string
   onOpen: () => void
 }) {
-  const meta = [
-    item.projectTitle,
-    item.status,
-    item.progress === undefined ? undefined : `进度 ${formatNumber(item.progress, 0)}%`,
-  ].filter(Boolean)
   const isBug = item.type === 'bug' || item.typeName === '缺陷'
+  const Icon = isBug ? Bug : ListTodo
+  const kind: DailyReportSectionKind = isBug ? 'bugs' : 'tasks'
+  const hasOverdue = (item.overdueDays ?? 0) > 0
+  const title = item.title || `${item.typeName} ${item.id}`
+  const subtitle = item.projectTitle || item.reason || ''
+  const metrics: Array<{
+    key: string
+    label: string
+    className?: string
+  }> = []
+
+  if (item.status) {
+    metrics.push({
+      key: 'status',
+      label: item.status,
+      className: statusToneClass(item.status, kind),
+    })
+  }
+
+  if (item.progress !== undefined) {
+    metrics.push({
+      key: 'progress',
+      label: `进度 ${formatNumber(item.progress, 0)}%`,
+    })
+  }
+
+  if (item.currentWorkHour !== undefined) {
+    metrics.push({
+      key: 'hours',
+      label: `耗时 ${formatNumber(item.currentWorkHour)}h`,
+    })
+  }
 
   return (
     <button
       type='button'
-      className='group flex w-full min-w-0 items-center gap-3 rounded-lg border border-transparent bg-background px-2.5 py-2.5 text-left transition-all hover:border-amber-500/30 hover:shadow-sm'
+      className={cn(
+        'group flex w-full min-w-0 items-start rounded-lg border bg-background text-left transition-colors',
+        selected
+          ? 'border-primary bg-primary/5'
+          : 'border-border/70 hover:border-primary/30 hover:bg-muted/30',
+        compact ? 'gap-2 px-2 py-2' : 'gap-3 px-2.5 py-2.5'
+      )}
       onClick={onOpen}
     >
       <span
         className={cn(
-          'flex size-8 shrink-0 items-center justify-center rounded-full border text-[11px] font-medium',
+          'mt-0.5 flex shrink-0 items-center justify-center rounded-full border',
+          compact ? 'size-7' : 'size-8',
           isBug
             ? 'border-destructive/20 bg-destructive/10 text-destructive'
             : 'border-blue-200 bg-blue-50 text-blue-700'
         )}
       >
-        {item.typeName}
+        <Icon className={cn(compact ? 'size-3.5' : 'size-4')} />
       </span>
-      <div className='min-w-0 flex-1'>
-        <div className='truncate text-sm font-medium group-hover:text-amber-700 dark:group-hover:text-amber-300'>
-          {item.title || `${item.typeName} ${item.id}`}
+      <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
+        <div className='flex min-w-0 items-start gap-2'>
+          <span className='min-w-0 flex-1 truncate text-sm font-medium group-hover:text-primary'>
+            {title}
+          </span>
+          {!compact && selected ? (
+            <Badge variant='secondary' className='shrink-0'>
+              当前
+            </Badge>
+          ) : null}
         </div>
-        {meta.length ? (
-          <div className='mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
-            {meta.map((text, index) => (
-              <Fragment key={`${item.key}-${text}-${index}`}>
-                {index > 0 ? (
-                  <span className='size-1 shrink-0 rounded-full bg-muted-foreground/30' />
-                ) : null}
-                <span className={cn(index === 0 && 'max-w-32 truncate')}>
-                  {text}
-                </span>
-              </Fragment>
-            ))}
+        {subtitle ? (
+          <div className='truncate text-xs text-muted-foreground' title={subtitle}>
+            {subtitle}
           </div>
-        ) : (
-          <div className='mt-1 truncate text-xs text-muted-foreground'>
-            {item.reason || '-'}
-          </div>
-        )}
+        ) : null}
+        <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+          <Badge variant='outline' className='font-normal'>
+            {item.typeName}
+          </Badge>
+          {hasOverdue ? (
+            <Badge
+              variant='outline'
+              className='border-destructive/30 bg-destructive/10 text-destructive'
+            >
+              逾期 {formatNumber(item.overdueDays ?? 0, 0)} 天
+            </Badge>
+          ) : null}
+          {metrics.map((metric) => (
+            <Badge
+              key={`${item.key}-${metric.key}`}
+              variant='outline'
+              className={cn('font-normal', metric.className)}
+            >
+              {metric.label}
+            </Badge>
+          ))}
+          {compact && selected ? (
+            <Badge variant='secondary' className='font-normal'>
+              当前
+            </Badge>
+          ) : null}
+          {saved ? (
+            <Badge variant='secondary' className='font-normal'>
+              已保存
+            </Badge>
+          ) : null}
+        </div>
       </div>
-      {saved ? (
-        <Badge variant='secondary' className='shrink-0'>
-          已保存
-        </Badge>
-      ) : (
-        <span className='hidden shrink-0 items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 transition-opacity group-hover:flex dark:text-amber-300'>
-          去填写
-          <ChevronRight className='size-3' />
-        </span>
-      )}
+      <span className='mt-1 flex shrink-0 items-center gap-1 text-xs font-medium text-muted-foreground transition-colors group-hover:text-primary'>
+        {compact ? null : actionLabel}
+        <ChevronRight className='size-3.5' />
+      </span>
     </button>
   )
 }
@@ -1427,30 +1487,15 @@ function WorkHourFillSheet({
                 const selected = item.key === selectedItem?.key
                 const saved = savedKeys.has(item.key)
                 return (
-                  <button
+                  <WorkHourFillListItem
                     key={item.key}
-                    type='button'
-                    className={cn(
-                      'bg-background rounded-md border px-3 py-2 text-left transition-colors',
-                      selected
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:bg-muted/50'
-                    )}
-                    onClick={() => setSelectedKey(item.key)}
-                  >
-                    <div className='flex min-w-0 items-center gap-2'>
-                      <Badge variant='outline'>{item.typeName}</Badge>
-                      {saved ? <Badge variant='secondary'>已保存</Badge> : null}
-                    </div>
-                    <div className='mt-1 truncate text-sm font-medium'>
-                      {item.title || item.typeName + ' ' + item.id}
-                    </div>
-                    {item.projectTitle ? (
-                      <div className='text-muted-foreground mt-1 truncate text-xs'>
-                        {item.projectTitle}
-                      </div>
-                    ) : null}
-                  </button>
+                    item={item}
+                    saved={saved}
+                    selected={selected}
+                    compact
+                    actionLabel='选择'
+                    onOpen={() => setSelectedKey(item.key)}
+                  />
                 )
               })}
             </div>
