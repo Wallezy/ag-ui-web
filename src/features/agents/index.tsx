@@ -21,6 +21,14 @@ import {
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Thread } from '@/components/assistant-ui/thread'
@@ -65,6 +73,7 @@ export function AgentWorkspace({
   const [isCreatingConversation, setIsCreatingConversation] = useState(false)
   const [isClearingConversations, setIsClearingConversations] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false)
   const [conversationError, setConversationError] = useState<string | null>(
     null
   )
@@ -241,6 +250,7 @@ export function AgentWorkspace({
     } catch {
       // Logout should still leave the agent UI even if the session is already invalid.
     } finally {
+      setIsLogoutDialogOpen(false)
       redirectToOaLogin()
     }
   }, [isLoggingOut])
@@ -274,7 +284,7 @@ export function AgentWorkspace({
             variant='ghost'
             aria-label='退出登录'
             disabled={isLoggingOut}
-            onClick={handleLogout}
+            onClick={() => setIsLogoutDialogOpen(true)}
           >
             {isLoggingOut ? (
               <LoaderCircle data-icon='inline-start' className='animate-spin' />
@@ -286,6 +296,45 @@ export function AgentWorkspace({
           <ThemeSwitch />
         </div>
       </Header>
+
+      <Dialog
+        open={isLogoutDialogOpen}
+        onOpenChange={(open) => {
+          if (!isLoggingOut) setIsLogoutDialogOpen(open)
+        }}
+      >
+        <DialogContent showCloseButton={!isLoggingOut}>
+          <DialogHeader>
+            <DialogTitle>确认退出登录？</DialogTitle>
+            <DialogDescription>
+              退出后将清理当前登录态，并跳转到登录页面。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type='button'
+              variant='outline'
+              disabled={isLoggingOut}
+              onClick={() => setIsLogoutDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type='button'
+              variant='destructive'
+              disabled={isLoggingOut}
+              onClick={handleLogout}
+            >
+              {isLoggingOut ? (
+                <LoaderCircle data-icon='inline-start' className='animate-spin' />
+              ) : (
+                <LogOut data-icon='inline-start' />
+              )}
+              {isLoggingOut ? '正在退出' : '确认退出'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Main fixed fluid className='p-0'>
         <div className='grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[18rem_minmax(0,1fr)]'>

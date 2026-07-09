@@ -194,17 +194,6 @@ export type AgentConfig = {
 
 const agentConfigs: AgentConfig[] = [
   {
-    id: 'weatherAgent',
-    backendAgentId: 'weather-agent',
-    label: '天气智能体',
-    shortLabel: '天气',
-    description: '实时天气、通勤和户外建议',
-    emptyTitle: '新的天气会话',
-    emptyMessage: '询问城市天气、体感温度、湿度和出行建议。',
-    newConversationTitle: '新的天气会话',
-    badge: 'Weather Agent',
-  },
-  {
     id: 'projectManagerAgent',
     backendAgentId: 'oa-agent',
     label: '项目管理智能体',
@@ -214,6 +203,17 @@ const agentConfigs: AgentConfig[] = [
     emptyMessage: '查询工作项、项目进展、风险和日报草稿。',
     newConversationTitle: '新的项目管理会话',
     badge: 'OA Agent',
+  },
+  {
+    id: 'weatherAgent',
+    backendAgentId: 'weather-agent',
+    label: '天气智能体',
+    shortLabel: '天气',
+    description: '实时天气、通勤和户外建议',
+    emptyTitle: '新的天气会话',
+    emptyMessage: '询问城市天气、体感温度、湿度和出行建议。',
+    newConversationTitle: '新的天气会话',
+    badge: 'Weather Agent',
   },
 ]
 

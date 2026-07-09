@@ -13,14 +13,14 @@ export const sidebarData: SidebarData = {
       title: 'AI',
       items: [
         {
-          title: '天气智能体',
-          url: '/agents/weather',
-          icon: CloudSun,
-        },
-        {
           title: '项目管理智能体',
           url: '/agents/project-manager',
           icon: FolderKanban,
+        },
+        {
+          title: '天气智能体',
+          url: '/agents/weather',
+          icon: CloudSun,
         },
       ],
     },
