@@ -1425,13 +1425,65 @@ function WorkHourFillSheet({
             <div className='flex flex-col gap-2 p-4'>
               {fillableItems.map((item) => {
                 const saved = savedKeys.has(item.key)
+                const selected = item.key === selectedItem?.key
+                const meta = [
+                  item.projectTitle,
+                  item.status,
+                  item.progress === undefined
+                    ? undefined
+                    : `进度 ${formatNumber(item.progress, 0)}%`,
+                ].filter(Boolean)
+                const isBug = item.type === 'bug' || item.typeName === '缺陷'
+
                 return (
-                  <WorkHourFillListItem
+                  <button
                     key={item.key}
-                    item={item}
-                    saved={saved}
-                    onOpen={() => setSelectedKey(item.key)}
-                  />
+                    type='button'
+                    className={cn(
+                      'group flex w-full min-w-0 items-center gap-3 rounded-lg border border-transparent bg-background px-2.5 py-2.5 text-left transition-all',
+                      selected && 'border-amber-500/30 shadow-sm'
+                    )}
+                    onClick={() => setSelectedKey(item.key)}
+                  >
+                    <span
+                      className={cn(
+                        'flex size-8 shrink-0 items-center justify-center rounded-full border text-[11px] font-medium',
+                        isBug
+                          ? 'border-destructive/20 bg-destructive/10 text-destructive'
+                          : 'border-blue-200 bg-blue-50 text-blue-700'
+                      )}
+                    >
+                      {item.typeName}
+                    </span>
+                    <div className='min-w-0 flex-1'>
+                      <div className='truncate text-sm font-medium group-hover:text-amber-700 dark:group-hover:text-amber-300'>
+                        {item.title || `${item.typeName} ${item.id}`}
+                      </div>
+                      {meta.length ? (
+                        <div className='mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
+                          {meta.map((text, index) => (
+                            <Fragment key={`${item.key}-${text}-${index}`}>
+                              {index > 0 ? (
+                                <span className='size-1 shrink-0 rounded-full bg-muted-foreground/30' />
+                              ) : null}
+                              <span className={cn(index === 0 && 'max-w-32 truncate')}>
+                                {text}
+                              </span>
+                            </Fragment>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className='mt-1 truncate text-xs text-muted-foreground'>
+                          {item.reason || '-'}
+                        </div>
+                      )}
+                    </div>
+                    {saved ? (
+                      <Badge variant='secondary' className='shrink-0'>
+                        已保存
+                      </Badge>
+                    ) : null}
+                  </button>
                 )
               })}
             </div>
