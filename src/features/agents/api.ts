@@ -63,6 +63,11 @@ type ClearConversationsResponse = {
   deletedCount: number
 }
 
+type DeleteConversationResponse = {
+  conversationId: string
+  deleted: boolean
+}
+
 type JsonValue =
   | string
   | number
@@ -274,6 +279,17 @@ export async function clearConversations() {
   return payload.deletedCount
 }
 
+export async function deleteConversation(conversationId: string) {
+  const payload = await request<DeleteConversationResponse>(
+    `/api/agent/conversations/${encodeURIComponent(conversationId)}`,
+    {
+      method: 'DELETE',
+    }
+  )
+  forgetRememberedConversationAgent(conversationId)
+  return payload.deleted
+}
+
 export async function loadConversationMessages(conversationId: string) {
   if (!conversationId) return []
   try {
@@ -450,6 +466,15 @@ function jsonHeaders(headers?: HeadersInit) {
 
 function clearRememberedConversationAgents() {
   window.localStorage.removeItem(CONVERSATION_AGENT_STORAGE_KEY)
+}
+
+function forgetRememberedConversationAgent(conversationId: string) {
+  const next = readConversationAgentMap()
+  delete next[conversationId]
+  window.localStorage.setItem(
+    CONVERSATION_AGENT_STORAGE_KEY,
+    JSON.stringify(next)
+  )
 }
 
 function readConversationAgentMap(): Partial<Record<string, AgentId>> {

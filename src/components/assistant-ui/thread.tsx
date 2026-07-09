@@ -80,8 +80,15 @@ export type ThreadComponents = {
     | undefined;
 };
 
+export type ThreadQuickAction = {
+  title: string;
+  description?: string | undefined;
+  prompt: string;
+};
+
 export type ThreadProps = {
   components?: ThreadComponents | undefined;
+  quickActions?: ThreadQuickAction[] | undefined;
 };
 
 const EMPTY_COMPONENTS: ThreadComponents = {};
@@ -95,18 +102,25 @@ const isNewChatView = (s: AssistantState) =>
   s.thread.messages.length === 0 &&
   (!s.thread.isLoading || s.threads.isLoading);
 
-export const Thread: FC<ThreadProps> = ({ components = EMPTY_COMPONENTS }) => {
+export const Thread: FC<ThreadProps> = ({
+  components = EMPTY_COMPONENTS,
+  quickActions = [],
+}) => {
   const isEmpty = useAuiState(isNewChatView);
 
   return (
     <ThreadComponentsContext.Provider value={components}>
-      <ThreadRoot isEmpty={isEmpty} />
+      <ThreadRoot isEmpty={isEmpty} quickActions={quickActions} />
     </ThreadComponentsContext.Provider>
   );
 };
 
-const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
+const ThreadRoot: FC<{
+  isEmpty: boolean;
+  quickActions: ThreadQuickAction[];
+}> = ({ isEmpty, quickActions }) => {
   const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
+  const hasQuickActions = quickActions.length > 0;
 
   return (
     <ThreadPrimitive.Root
@@ -152,9 +166,13 @@ const ThreadRoot: FC<{ isEmpty: boolean }> = ({ isEmpty }) => {
           >
             <ThreadScrollToBottom />
             <Composer />
-            <AuiIf condition={isNewChatView}>
-              <ThreadSuggestionsSlot />
-            </AuiIf>
+            {hasQuickActions ? (
+              <ThreadQuickActionsSlot actions={quickActions} />
+            ) : (
+              <AuiIf condition={isNewChatView}>
+                <ThreadSuggestionsSlot />
+              </AuiIf>
+            )}
           </ThreadPrimitive.ViewportFooter>
         </div>
       </ThreadPrimitive.Viewport>
@@ -218,6 +236,46 @@ const ThreadSuggestionsSlot: FC = () => {
       )}
     >
       <ThreadSuggestions />
+    </div>
+  );
+};
+
+const ThreadQuickActionsSlot: FC<{ actions: ThreadQuickAction[] }> = ({
+  actions,
+}) => {
+  const visible = useAuiState((s) => s.composer.isEmpty && !s.thread.isRunning);
+
+  return (
+    <div
+      className={cn(
+        "aui-thread-quick-actions-slot transition-opacity",
+        !visible && "pointer-events-none invisible opacity-0",
+      )}
+    >
+      <div className="aui-thread-quick-actions flex w-full flex-wrap items-center justify-center gap-2 px-4">
+        {actions.map((action) => (
+          <div
+            key={action.prompt}
+            className="aui-thread-quick-action-display fade-in slide-in-from-bottom-2 animate-in fill-mode-both duration-200"
+          >
+            <ThreadPrimitive.Suggestion prompt={action.prompt} send asChild>
+              <Button
+                variant="ghost"
+                className="aui-thread-quick-action text-foreground hover:bg-muted border-border/60 h-auto gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-normal whitespace-nowrap transition-colors"
+              >
+                <span className="aui-thread-quick-action-title">
+                  {action.title}
+                </span>
+                {action.description ? (
+                  <span className="aui-thread-quick-action-description text-muted-foreground">
+                    {action.description}
+                  </span>
+                ) : null}
+              </Button>
+            </ThreadPrimitive.Suggestion>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

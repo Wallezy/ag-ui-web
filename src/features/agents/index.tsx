@@ -9,11 +9,11 @@ import { useAgUiRuntime } from '@assistant-ui/react-ag-ui'
 import {
   Bot,
   CloudSun,
+  Eraser,
   FolderKanban,
   Home,
   LoaderCircle,
   LogIn,
-  LogOut,
   MessageSquarePlus,
   ShieldAlert,
   Trash2,
@@ -21,17 +21,12 @@ import {
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { Thread } from '@/components/assistant-ui/thread'
+import {
+  Thread,
+  type ThreadQuickAction,
+} from '@/components/assistant-ui/thread'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { ThemeSwitch } from '@/components/theme-switch'
@@ -42,6 +37,7 @@ import {
   checkOaSession,
   clearConversations,
   createConversation,
+  deleteConversation,
   loadConversationMessages,
   listConversations,
   redirectToOaLogin,
@@ -56,7 +52,16 @@ type RefreshOptions = {
 }
 
 const ADMIN_PORTAL_URL = '/app/admin/#/portal'
-const OA_LOGOUT_URL = '/auth/token/logout'
+const PROJECT_MANAGER_QUICK_ACTIONS: ThreadQuickAction[] = [
+  {
+    title: '填工时',
+    prompt: '我要填工时',
+  },
+  {
+    title: '写日报',
+    prompt: '我要写日报',
+  },
+]
 
 export function AgentWorkspace({
   initialAgentId,
@@ -72,8 +77,9 @@ export function AgentWorkspace({
   const [isLoadingConversations, setIsLoadingConversations] = useState(false)
   const [isCreatingConversation, setIsCreatingConversation] = useState(false)
   const [isClearingConversations, setIsClearingConversations] = useState(false)
-  const [isLoggingOut, setIsLoggingOut] = useState(false)
-  const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false)
+  const [deletingConversationIds, setDeletingConversationIds] = useState<
+    Set<string>
+  >(() => new Set())
   const [conversationError, setConversationError] = useState<string | null>(
     null
   )
@@ -225,6 +231,35 @@ export function AgentWorkspace({
     }
   }, [conversations.length, isClearingConversations])
 
+  const handleDeleteConversation = useCallback(
+    async (conversationId: string) => {
+      if (deletingConversationIds.has(conversationId)) return
+      const confirmed = window.confirm('确认删除这条历史会话吗？')
+      if (!confirmed) return
+
+      setDeletingConversationIds((current) => {
+        const next = new Set(current)
+        next.add(conversationId)
+        return next
+      })
+      setConversationError(null)
+
+      try {
+        await deleteConversation(conversationId)
+        await refreshConversations({ keepSelection: true, quiet: true })
+      } catch {
+        setConversationError('历史会话删除失败')
+      } finally {
+        setDeletingConversationIds((current) => {
+          const next = new Set(current)
+          next.delete(conversationId)
+          return next
+        })
+      }
+    },
+    [deletingConversationIds, refreshConversations]
+  )
+
   const handleConversationActivity = useCallback(() => {
     if (refreshTimerRef.current) {
       window.clearTimeout(refreshTimerRef.current)
@@ -237,23 +272,6 @@ export function AgentWorkspace({
   const handleGoPortal = useCallback(() => {
     window.location.assign(ADMIN_PORTAL_URL)
   }, [])
-
-  const handleLogout = useCallback(async () => {
-    if (isLoggingOut) return
-
-    setIsLoggingOut(true)
-    try {
-      await window.fetch(OA_LOGOUT_URL, {
-        method: 'DELETE',
-        credentials: 'include',
-      })
-    } catch {
-      // Logout should still leave the agent UI even if the session is already invalid.
-    } finally {
-      setIsLogoutDialogOpen(false)
-      redirectToOaLogin()
-    }
-  }, [isLoggingOut])
 
   return (
     <>
@@ -279,62 +297,9 @@ export function AgentWorkspace({
             <Home data-icon='inline-start' />
             <span className='hidden sm:inline'>主页面</span>
           </Button>
-          <Button
-            size='sm'
-            variant='ghost'
-            aria-label='退出登录'
-            disabled={isLoggingOut}
-            onClick={() => setIsLogoutDialogOpen(true)}
-          >
-            {isLoggingOut ? (
-              <LoaderCircle data-icon='inline-start' className='animate-spin' />
-            ) : (
-              <LogOut data-icon='inline-start' />
-            )}
-            <span className='hidden sm:inline'>退出</span>
-          </Button>
           <ThemeSwitch />
         </div>
       </Header>
-
-      <Dialog
-        open={isLogoutDialogOpen}
-        onOpenChange={(open) => {
-          if (!isLoggingOut) setIsLogoutDialogOpen(open)
-        }}
-      >
-        <DialogContent showCloseButton={!isLoggingOut}>
-          <DialogHeader>
-            <DialogTitle>确认退出登录？</DialogTitle>
-            <DialogDescription>
-              退出后将清理当前登录态，并跳转到登录页面。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type='button'
-              variant='outline'
-              disabled={isLoggingOut}
-              onClick={() => setIsLogoutDialogOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              type='button'
-              variant='destructive'
-              disabled={isLoggingOut}
-              onClick={handleLogout}
-            >
-              {isLoggingOut ? (
-                <LoaderCircle data-icon='inline-start' className='animate-spin' />
-              ) : (
-                <LogOut data-icon='inline-start' />
-              )}
-              {isLoggingOut ? '正在退出' : '确认退出'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Main fixed fluid className='p-0'>
         <div className='grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[18rem_minmax(0,1fr)]'>
@@ -360,7 +325,7 @@ export function AgentWorkspace({
                 {isClearingConversations ? (
                   <LoaderCircle className='animate-spin' />
                 ) : (
-                  <Trash2 />
+                  <Eraser />
                 )}
               </Button>
               <Button
@@ -395,7 +360,11 @@ export function AgentWorkspace({
                       conversation={conversation}
                       active={activeConversationId === conversation.id}
                       agent={agentById(conversation.agentId)}
+                      deleting={deletingConversationIds.has(conversation.id)}
                       onClick={() => setActiveConversationId(conversation.id)}
+                      onDelete={() =>
+                        void handleDeleteConversation(conversation.id)
+                      }
                     />
                   ))
                 ) : (
@@ -419,6 +388,11 @@ export function AgentWorkspace({
                 agent={activeAgent}
                 conversationId={activeConversationId}
                 onConversationActivity={handleConversationActivity}
+                quickActions={
+                  activeAgent.id === 'projectManagerAgent'
+                    ? PROJECT_MANAGER_QUICK_ACTIONS
+                    : undefined
+                }
               />
             ) : (
               <EmptyConversationState
@@ -438,10 +412,12 @@ function AgentThread({
   agent: activeAgent,
   conversationId,
   onConversationActivity,
+  quickActions,
 }: {
   agent: AgentConfig
   conversationId: string
   onConversationActivity: () => void
+  quickActions?: ThreadQuickAction[]
 }) {
   const agent = useMemo(
     () =>
@@ -484,6 +460,7 @@ function AgentThread({
           ToolFallback: AgentToolFallback,
           ToolGroup: AgentToolGroup,
         }}
+        quickActions={quickActions}
       />
     </AssistantRuntimeProvider>
   )
@@ -493,44 +470,71 @@ function ConversationButton({
   conversation,
   active,
   agent,
+  deleting,
   onClick,
+  onDelete,
 }: {
   conversation: ConversationSummary
   active: boolean
   agent: AgentConfig
+  deleting: boolean
   onClick: () => void
+  onDelete: () => void
 }) {
   return (
-    <button
-      type='button'
-      onClick={onClick}
-      className={cn(
-        'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground flex w-full flex-col gap-2 rounded-md px-3 py-2 text-start transition-colors',
-        active && 'bg-sidebar-accent text-sidebar-accent-foreground'
-      )}
-    >
-      <div className='flex w-full items-center gap-2'>
-        <span className='truncate text-sm font-medium'>
-          {conversation.title}
-        </span>
-        <span className='text-muted-foreground ms-auto shrink-0 text-xs'>
-          {conversation.updatedAt}
-        </span>
-      </div>
-      <div className='text-muted-foreground line-clamp-2 text-xs'>
-        {conversation.lastMessage}
-      </div>
-      <div className='flex items-center gap-2'>
-        <Badge variant='secondary' className='w-fit'>
-          {agent.badge}
-        </Badge>
-        {conversation.status === 'running' ? (
-          <Badge variant='outline' className='w-fit'>
-            运行中
+    <div className='group relative rounded-md'>
+      <button
+        type='button'
+        onClick={onClick}
+        className={cn(
+          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground flex w-full flex-col gap-2 rounded-md py-2 ps-3 pe-10 text-start transition-colors',
+          active && 'bg-sidebar-accent text-sidebar-accent-foreground'
+        )}
+      >
+        <div className='flex w-full items-center gap-2'>
+          <span className='truncate text-sm font-medium'>
+            {conversation.title}
+          </span>
+          <span className='text-muted-foreground ms-auto shrink-0 text-xs'>
+            {conversation.updatedAt}
+          </span>
+        </div>
+        <div className='text-muted-foreground line-clamp-2 text-xs'>
+          {conversation.lastMessage}
+        </div>
+        <div className='flex items-center gap-2'>
+          <Badge variant='secondary' className='w-fit'>
+            {agent.badge}
           </Badge>
-        ) : null}
-      </div>
-    </button>
+          {conversation.status === 'running' ? (
+            <Badge variant='outline' className='w-fit'>
+              运行中
+            </Badge>
+          ) : null}
+        </div>
+      </button>
+      <Button
+        type='button'
+        size='icon'
+        variant='ghost'
+        aria-label='删除会话'
+        disabled={deleting}
+        onClick={(event) => {
+          event.stopPropagation()
+          onDelete()
+        }}
+        className={cn(
+          'text-destructive hover:bg-destructive/10 hover:text-destructive absolute top-1 right-1 size-7 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
+          deleting && 'opacity-100'
+        )}
+      >
+        {deleting ? (
+          <LoaderCircle className='animate-spin' />
+        ) : (
+          <Trash2 />
+        )}
+      </Button>
+    </div>
   )
 }
 
