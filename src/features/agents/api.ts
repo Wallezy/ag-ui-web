@@ -286,22 +286,24 @@ export async function clearConversations(agent: AgentConfig) {
   return payload.deletedCount
 }
 
-export async function loadConversationMessages(
+export async function deleteConversation(
   conversationId: string,
   agent: AgentConfig
 ) {
-export async function deleteConversation(conversationId: string) {
   const payload = await request<DeleteConversationResponse>(
     `/api/agent/conversations/${encodeURIComponent(conversationId)}`,
     {
       method: 'DELETE',
+      headers: agentHeaders(agent),
     }
   )
-  forgetRememberedConversationAgent(conversationId)
   return payload.deleted
 }
 
-export async function loadConversationMessages(conversationId: string) {
+export async function loadConversationMessages(
+  conversationId: string,
+  agent: AgentConfig
+) {
   if (!conversationId) return []
   try {
     const detail = await request<ConversationDetail>(
@@ -488,35 +490,6 @@ function jsonHeaders(headers?: HeadersInit) {
     next.set('content-type', 'application/json')
   }
   return next
-}
-
-function clearRememberedConversationAgents() {
-  window.localStorage.removeItem(CONVERSATION_AGENT_STORAGE_KEY)
-}
-
-function forgetRememberedConversationAgent(conversationId: string) {
-  const next = readConversationAgentMap()
-  delete next[conversationId]
-  window.localStorage.setItem(
-    CONVERSATION_AGENT_STORAGE_KEY,
-    JSON.stringify(next)
-  )
-}
-
-function readConversationAgentMap(): Partial<Record<string, AgentId>> {
-  try {
-    const raw = window.localStorage.getItem(CONVERSATION_AGENT_STORAGE_KEY)
-    if (!raw) return {}
-    const value = JSON.parse(raw) as Record<string, unknown>
-    return Object.fromEntries(
-      Object.entries(value).filter(
-        (entry): entry is [string, AgentId] =>
-          entry[1] === 'weatherAgent' || entry[1] === 'projectManagerAgent'
-      )
-    )
-  } catch {
-    return {}
-  }
 }
 
 function statusLabel(status: string) {

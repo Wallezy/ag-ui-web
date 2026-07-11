@@ -44,6 +44,7 @@ install:
     - pnpm -v
   script:
     - pnpm install --frozen-lockfile
+    - pnpm run test
     - pnpm run build
   artifacts:
     paths:

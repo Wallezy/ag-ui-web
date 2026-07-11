@@ -14,6 +14,7 @@ import {
   Home,
   LoaderCircle,
   LogIn,
+  LogOut,
   MessageSquarePlus,
   RefreshCw,
   ShieldAlert,
@@ -22,6 +23,14 @@ import {
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -56,6 +65,7 @@ type RefreshOptions = {
 type OaSessionState = 'checking' | 'ready' | 'login-required' | 'unavailable'
 
 const ADMIN_PORTAL_URL = '/app/admin/#/portal'
+const OA_LOGOUT_URL = '/auth/token/logout'
 const PROJECT_MANAGER_QUICK_ACTIONS: ThreadQuickAction[] = [
   {
     title: '填工时',
@@ -81,6 +91,8 @@ export function AgentWorkspace({
   const [isLoadingConversations, setIsLoadingConversations] = useState(false)
   const [isCreatingConversation, setIsCreatingConversation] = useState(false)
   const [isClearingConversations, setIsClearingConversations] = useState(false)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false)
   const [deletingConversationIds, setDeletingConversationIds] = useState<
     Set<string>
   >(() => new Set())
@@ -253,7 +265,7 @@ export function AgentWorkspace({
       setConversationError(null)
 
       try {
-        await deleteConversation(conversationId)
+        await deleteConversation(conversationId, activeAgent)
         await refreshConversations({ keepSelection: true, quiet: true })
       } catch {
         setConversationError('历史会话删除失败')
@@ -265,7 +277,7 @@ export function AgentWorkspace({
         })
       }
     },
-    [deletingConversationIds, refreshConversations]
+    [activeAgent, deletingConversationIds, refreshConversations]
   )
 
   const handleConversationActivity = useCallback(() => {
@@ -280,6 +292,23 @@ export function AgentWorkspace({
   const handleGoPortal = useCallback(() => {
     window.location.assign(ADMIN_PORTAL_URL)
   }, [])
+
+  const handleLogout = useCallback(async () => {
+    if (isLoggingOut) return
+
+    setIsLoggingOut(true)
+    try {
+      await window.fetch(OA_LOGOUT_URL, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+    } catch {
+      // Leave the Agent UI even when the OA session is already invalid.
+    } finally {
+      setIsLogoutDialogOpen(false)
+      redirectToOaLogin()
+    }
+  }, [isLoggingOut])
 
   return (
     <>
@@ -304,6 +333,20 @@ export function AgentWorkspace({
           >
             <Home data-icon='inline-start' />
             <span className='hidden sm:inline'>主页面</span>
+          </Button>
+          <Button
+            size='sm'
+            variant='ghost'
+            aria-label='退出登录'
+            disabled={isLoggingOut}
+            onClick={() => setIsLogoutDialogOpen(true)}
+          >
+            {isLoggingOut ? (
+              <LoaderCircle data-icon='inline-start' className='animate-spin' />
+            ) : (
+              <LogOut data-icon='inline-start' />
+            )}
+            <span className='hidden sm:inline'>退出</span>
           </Button>
           <ThemeSwitch />
         </div>
@@ -588,11 +631,7 @@ function ConversationButton({
           deleting && 'opacity-100'
         )}
       >
-        {deleting ? (
-          <LoaderCircle className='animate-spin' />
-        ) : (
-          <Trash2 />
-        )}
+        {deleting ? <LoaderCircle className='animate-spin' /> : <Trash2 />}
       </Button>
     </div>
   )

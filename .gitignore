@@ -1,10 +1,38 @@
+# Dependencies and package-manager caches
 node_modules/
+/.npm-cache/
+/.pnpm-store/
+
+# Build and coverage output
 dist/
 dist-ssr/
 coverage/
+*.tsbuildinfo
+/.tsbuild/
+/vite.config.js
+/vite.config.d.ts
+
+# Browser and test artifacts
+/.playwright-cli/
+/output/
+/playwright-report/
+/test-results/
+/blob-report/
+
+# Tool caches
+/.cache/
+/.vite/
+.eslintcache
+.stylelintcache
+
+# Logs and local environment
 *.log
 .env
 .env.*
+!.env.example
+!.env.*.example
+
+# OS and editors
 .DS_Store
 .idea/
 .vscode/*
