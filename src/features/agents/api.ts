@@ -2,6 +2,7 @@ import type {
   ThreadAssistantMessagePart,
   ThreadMessage,
 } from '@assistant-ui/react'
+import { ApiRequestError } from './api-error'
 import type { AgentId, ConversationSummary } from './types'
 
 const AGUI_WEATHER_ENDPOINT = '/api/agent/ag-ui'
@@ -20,13 +21,12 @@ export const AGUI_RUN_URL =
   import.meta.env.VITE_AGUI_WEATHER_URL ??
   `${API_BASE_URL}${AGUI_WEATHER_ENDPOINT}`
 
-const CONVERSATION_AGENT_STORAGE_KEY = 'agent-platform:conversation-agents'
-
 type BackendConversationSummary = {
   id: string
   title: string
   status: string
   updatedAt: number | string
+  agentId?: string | null
   ownerId: string
   tenantId: string
 }
@@ -72,6 +72,10 @@ type JsonValue =
   | { readonly [key: string]: JsonValue }
 
 type JsonObject = { readonly [key: string]: JsonValue }
+
+type RequestOptions = {
+  redirectOnUnauthorized?: boolean
+}
 
 export type OaSessionStatus = {
   authenticated: boolean
@@ -156,6 +160,7 @@ export type WorkHourOptionsResponse = {
   evidences: Record<string, unknown>[]
   projectBases: Record<string, unknown>[]
   designs: Record<string, unknown>[]
+  idempotencyKey: string
 }
 
 export type SaveWorkHourExecutionRequest = {
@@ -168,6 +173,7 @@ export type SaveWorkHourExecutionRequest = {
   executionDesc?: string
   description?: string
   evidences?: Record<string, unknown>[]
+  idempotencyKey: string
   confirmationContext?: Record<string, unknown>
 }
 
@@ -223,62 +229,67 @@ export function agentById(agentId: AgentId) {
   return agentConfigs.find((agent) => agent.id === agentId) ?? defaultAgent
 }
 
-function rememberConversationAgent(conversationId: string, agentId: AgentId) {
-  const next = {
-    ...readConversationAgentMap(),
-    [conversationId]: agentId,
-  }
-  window.localStorage.setItem(
-    CONVERSATION_AGENT_STORAGE_KEY,
-    JSON.stringify(next)
-  )
-}
-
-export async function listConversations() {
+export async function listConversations(agent: AgentConfig) {
   const payload = await request<ConversationListResponse>(
-    '/api/agent/conversations'
+    '/api/agent/conversations',
+    { headers: agentHeaders(agent) }
   )
-  return payload.conversations.map(toConversationSummary)
+  return payload.conversations
+    .map(toConversationSummary)
+    .filter(
+      (conversation): conversation is ConversationSummary =>
+        conversation !== null
+    )
 }
 
 export async function createConversation(agent: AgentConfig) {
   const conversationId = `thread-web-${agent.id}-${createClientId()}`
-  rememberConversationAgent(conversationId, agent.id)
 
+  let payload: CreateConversationResponse
   try {
-    const payload = await request<CreateConversationResponse>(
+    payload = await request<CreateConversationResponse>(
       '/api/agent/conversations',
       {
         method: 'POST',
+        headers: agentHeaders(agent),
         body: JSON.stringify({
           conversationId,
           title: agent.newConversationTitle,
+          agentId: agent.backendAgentId,
         }),
       }
     )
-    rememberConversationAgent(payload.conversation.id, agent.id)
-    return toConversationSummary(payload.conversation)
   } catch {
     return toLocalConversationSummary(conversationId, agent)
   }
+
+  const conversation = toConversationSummary(payload.conversation)
+  if (!conversation) {
+    throw new Error('Conversation uses an unsupported agent')
+  }
+  return conversation
 }
 
-export async function clearConversations() {
+export async function clearConversations(agent: AgentConfig) {
   const payload = await request<ClearConversationsResponse>(
     '/api/agent/conversations',
     {
       method: 'DELETE',
+      headers: agentHeaders(agent),
     }
   )
-  clearRememberedConversationAgents()
   return payload.deletedCount
 }
 
-export async function loadConversationMessages(conversationId: string) {
+export async function loadConversationMessages(
+  conversationId: string,
+  agent: AgentConfig
+) {
   if (!conversationId) return []
   try {
     const detail = await request<ConversationDetail>(
-      `/api/agent/conversations/${encodeURIComponent(conversationId)}`
+      `/api/agent/conversations/${encodeURIComponent(conversationId)}`,
+      { headers: agentHeaders(agent) }
     )
     return timelineToThreadMessages(detail.timeline)
   } catch {
@@ -287,10 +298,14 @@ export async function loadConversationMessages(conversationId: string) {
 }
 
 export async function checkOaSession(authContext?: Record<string, unknown>) {
-  return request<OaSessionStatus>('/api/agent/oa/session', {
-    method: 'POST',
-    body: JSON.stringify(authContext ? { authContext } : {}),
-  })
+  return request<OaSessionStatus>(
+    '/api/agent/oa/session',
+    {
+      method: 'POST',
+      body: JSON.stringify(authContext ? { authContext } : {}),
+    },
+    { redirectOnUnauthorized: false }
+  )
 }
 
 export async function confirmDailyReport(
@@ -311,7 +326,8 @@ export async function getDailyReportDraftStatus(draftId: string) {
 
 export async function getWorkHourOptions(
   item: Pick<MissingWorkHourItem, 'type' | 'id' | 'workDate' | 'projectId'>,
-  fallbackWorkDate?: string
+  fallbackWorkDate: string | undefined,
+  conversationId: string
 ) {
   const params = new URLSearchParams({
     type: item.type,
@@ -323,6 +339,7 @@ export async function getWorkHourOptions(
   if (item.projectId) {
     params.set('projectId', item.projectId)
   }
+  params.set('conversationId', conversationId)
   return request<WorkHourOptionsResponse>(
     `/api/agent/oa/work-hours/options?${params.toString()}`
   )
@@ -366,13 +383,15 @@ export async function apiFetch(url: string, requestInit: RequestInit) {
 
 function toConversationSummary(
   conversation: BackendConversationSummary
-): ConversationSummary {
+): ConversationSummary | null {
+  const agentId = agentForConversation(conversation)
+  if (!agentId) return null
   return {
     id: conversation.id,
     title: conversation.title,
     lastMessage: statusLabel(conversation.status),
     updatedAt: formatRelativeTime(conversation.updatedAt),
-    agentId: agentForConversation(conversation),
+    agentId,
     status: conversation.status,
   }
 }
@@ -392,36 +411,41 @@ function toLocalConversationSummary(
 }
 
 function agentForConversation(conversation: BackendConversationSummary) {
-  const mapped = readConversationAgentMap()[conversation.id]
-  if (mapped) return mapped
-  if (conversation.id.includes('projectManagerAgent')) {
-    return 'projectManagerAgent'
+  if (!conversation.agentId) {
+    return defaultAgent.id
   }
-  if (conversation.id.includes('weatherAgent')) {
-    return 'weatherAgent'
-  }
-  if (conversation.title.includes('项目管理')) {
-    return 'projectManagerAgent'
-  }
-  if (conversation.title.includes('天气')) {
-    return 'weatherAgent'
-  }
-  return defaultAgent.id
+  return (
+    agentConfigs.find((agent) => agent.backendAgentId === conversation.agentId)
+      ?.id ?? null
+  )
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+function agentHeaders(agent: AgentConfig) {
+  return {
+    'x-agent-platform-agent-id': agent.backendAgentId,
+  }
+}
+
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  options: RequestOptions = {}
+): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     credentials: 'include',
     headers: jsonHeaders(init?.headers),
   })
-  if (response.status === 401) {
-    redirectToOaLogin()
-    throw new Error('OA login required')
-  }
   if (!response.ok) {
     const errorText = await response.text()
-    throw new Error(readErrorMessage(errorText) || 'Request failed: ' + response.status)
+    const error = new ApiRequestError(
+      response.status,
+      readErrorMessage(errorText) || 'Request failed: ' + response.status
+    )
+    if (response.status === 401 && options.redirectOnUnauthorized !== false) {
+      redirectToOaLogin()
+    }
+    throw error
   }
   const text = await response.text()
   return (text ? JSON.parse(text) : {}) as T
@@ -433,7 +457,8 @@ function readErrorMessage(text: string) {
   try {
     const payload = JSON.parse(fallback) as Record<string, unknown>
     const message = typeof payload.message === 'string' ? payload.message : ''
-    const errorCode = typeof payload.errorCode === 'string' ? payload.errorCode : ''
+    const errorCode =
+      typeof payload.errorCode === 'string' ? payload.errorCode : ''
     return [errorCode, message].filter(Boolean).join(': ') || fallback
   } catch {
     return fallback
@@ -446,26 +471,6 @@ function jsonHeaders(headers?: HeadersInit) {
     next.set('content-type', 'application/json')
   }
   return next
-}
-
-function clearRememberedConversationAgents() {
-  window.localStorage.removeItem(CONVERSATION_AGENT_STORAGE_KEY)
-}
-
-function readConversationAgentMap(): Partial<Record<string, AgentId>> {
-  try {
-    const raw = window.localStorage.getItem(CONVERSATION_AGENT_STORAGE_KEY)
-    if (!raw) return {}
-    const value = JSON.parse(raw) as Record<string, unknown>
-    return Object.fromEntries(
-      Object.entries(value).filter(
-        (entry): entry is [string, AgentId] =>
-          entry[1] === 'weatherAgent' || entry[1] === 'projectManagerAgent'
-      )
-    )
-  } catch {
-    return {}
-  }
 }
 
 function statusLabel(status: string) {
