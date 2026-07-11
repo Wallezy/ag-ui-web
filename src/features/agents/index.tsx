@@ -20,6 +20,7 @@ import {
   ShieldAlert,
   Trash2,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -42,6 +43,7 @@ import { Main } from '@/components/layout/main'
 import { ThemeSwitch } from '@/components/theme-switch'
 import {
   AGUI_RUN_URL,
+  DEFAULT_AGENT_RUN_ERROR_MESSAGE,
   agentById,
   apiFetch,
   checkOaSession,
@@ -550,10 +552,17 @@ function AgentThread({
     [activeAgent, conversationId, onConversationActivity]
   )
 
+  const handleRunError = useCallback(() => {
+    toast.error(DEFAULT_AGENT_RUN_ERROR_MESSAGE, {
+      id: 'agent-run-error',
+    })
+    onConversationActivity()
+  }, [onConversationActivity])
+
   const runtime = useAgUiRuntime({
     agent,
     adapters: { history },
-    onError: onConversationActivity,
+    onError: handleRunError,
   })
 
   return (

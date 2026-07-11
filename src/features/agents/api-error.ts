@@ -8,7 +8,7 @@ export class ApiRequestError extends Error {
   }
 }
 
-export type OaSessionFailure = {
+type OaSessionFailure = {
   kind: 'login-required' | 'unavailable'
   message: string
 }
