@@ -1,5 +1,6 @@
 import {
   Fragment,
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -79,6 +80,7 @@ import {
   type MissingWorkHourItem,
   type WorkHourOptionsResponse,
 } from './api'
+import { isDailyReportConfirmationAccepted } from './daily-report-confirmation'
 
 type WeatherResult = {
   temperature: number
@@ -224,8 +226,7 @@ const oaToolNames = new Set([
   'submitDailyReport',
 ])
 const OA_LOGIN_REQUIRED = 'OA_LOGIN_REQUIRED'
-const OA_MY_WORK_ITEM_URL =
-  '/app/pm/#/pm/myWorkitem/index'
+const OA_MY_WORK_ITEM_URL = '/app/pm/#/pm/myWorkitem/index'
 const OA_PROJECT_LIST_URL = '/app/pm/#/pm/projectList/index'
 
 const oaToolCopy: Record<
@@ -572,7 +573,7 @@ function OaDailyReportDraftCard({
     return () => {
       cancelled = true
     }
-  }, [draft.draftId])
+  }, [draft.draftId, draft.overdueReasonItems])
   const validationMessages = draft.validationErrors.length
     ? draft.validationErrors
     : draft.validationWarnings
@@ -594,7 +595,8 @@ function OaDailyReportDraftCard({
     submitState !== 'success'
   const canSubmit = showConfirmButton && missingOverdueReasonCount === 0
   const hasPendingOverdueReasons = missingOverdueReasonCount > 0
-  const hasValidationProblem = validationMessages.length > 0 || !draft.submitReady
+  const hasValidationProblem =
+    validationMessages.length > 0 || !draft.submitReady
   const needsAttention = hasValidationProblem
   const missingWorkHourItems = draft.missingWorkHourItems
   const hasMissingWorkHours = validationMessages.some(
@@ -630,28 +632,28 @@ function OaDailyReportDraftCard({
         draft.confirmEndpoint || '/api/agent/confirm'
       )
       setSubmitResult(response)
-      setSubmitState(response.errorCode ? 'error' : 'success')
-      if (response.errorCode) {
-        setSubmitError(response.message || response.errorCode)
-      } else {
-        const responseReasons = readStringRecord(
-          response.result?.overdueReasons
-        )
-        const savedReasons = Object.keys(responseReasons).length
-          ? responseReasons
-          : confirmedOverdueReasons
-        setOverdueReasons((current) =>
-          mergeOverdueReasons(draft.overdueReasonItems, current, savedReasons)
-        )
-        setServerDraft({
-          draftId: draft.draftId,
-          status: 'SUBMITTED',
-          submitted: true,
-          overdueReasons: savedReasons,
-          result: response.result,
-          message: response.message || '日报已提交',
-        })
+      if (!isDailyReportConfirmationAccepted(response)) {
+        setSubmitState('error')
+        setSubmitError(response.message || response.errorCode || '日报提交失败')
+        return
       }
+
+      setSubmitState('success')
+      const responseReasons = readStringRecord(response.result?.overdueReasons)
+      const savedReasons = Object.keys(responseReasons).length
+        ? responseReasons
+        : confirmedOverdueReasons
+      setOverdueReasons((current) =>
+        mergeOverdueReasons(draft.overdueReasonItems, current, savedReasons)
+      )
+      setServerDraft({
+        draftId: draft.draftId,
+        status: 'SUBMITTED',
+        submitted: true,
+        overdueReasons: savedReasons,
+        result: response.result,
+        message: response.message || '日报已提交',
+      })
     } catch (error) {
       setSubmitState('error')
       setSubmitError(
@@ -891,12 +893,7 @@ function OaDailyReportDraftCard({
             </div>
             <div className='min-w-0'>
               <div className='text-sm font-medium'>{actionTitle}</div>
-              <div
-                className={cn(
-                  'mt-1 text-xs',
-                  actionDescriptionClass
-                )}
-              >
+              <div className={cn('mt-1 text-xs', actionDescriptionClass)}>
                 {savedWorkHourCount > 0
                   ? '已补充 ' +
                     savedWorkHourCount +
@@ -1003,7 +1000,10 @@ function WorkHourFillActionCard({
       setSelectedKey('')
       return
     }
-    if (!selectedKey || !fillableItems.some((item) => item.key === selectedKey)) {
+    if (
+      !selectedKey ||
+      !fillableItems.some((item) => item.key === selectedKey)
+    ) {
       setSelectedKey(fillableItems[0].key)
     }
   }, [canQuickFill, fillableItems, selectedKey])
@@ -1056,7 +1056,7 @@ function WorkHourFillActionCard({
         {canQuickFill ? (
           <>
             <div className='bg-muted/30 px-3 py-2'>
-              <div className='mb-2 flex items-center justify-between gap-3 px-2 text-xs text-muted-foreground'>
+              <div className='text-muted-foreground mb-2 flex items-center justify-between gap-3 px-2 text-xs'>
                 <span>请选择要填写的项</span>
                 <span>
                   展示 1-{visibleItems.length} 项
@@ -1086,14 +1086,14 @@ function WorkHourFillActionCard({
 
             <div className='flex flex-col gap-4 border-t px-4 py-4 sm:px-5'>
               <div className='bg-primary/5 flex items-start gap-2 rounded-lg border px-3 py-3'>
-                <HelpCircle className='mt-0.5 size-4 shrink-0 text-primary' />
+                <HelpCircle className='text-primary mt-0.5 size-4 shrink-0' />
                 <div className='min-w-0 text-sm'>
                   <div className='font-medium'>
                     {savedCount > 0
                       ? `已保存 ${savedCount} / ${fillableItems.length} 项工时`
                       : `共 ${fillableItems.length} 项待填工时`}
                   </div>
-                  <div className='mt-1 text-xs text-muted-foreground'>
+                  <div className='text-muted-foreground mt-1 text-xs'>
                     保存后可重新生成日报草稿，系统会重新读取 OA 数据。
                   </div>
                 </div>
@@ -1120,12 +1120,10 @@ function WorkHourFillActionCard({
           </>
         ) : (
           <div className='flex flex-col gap-4 px-4 py-4 sm:px-5'>
-            <div className='flex flex-col gap-3 rounded-lg border bg-muted/30 px-3 py-3 sm:flex-row sm:items-center sm:justify-between'>
+            <div className='bg-muted/30 flex flex-col gap-3 rounded-lg border px-3 py-3 sm:flex-row sm:items-center sm:justify-between'>
               <div className='min-w-0 text-sm'>
-                <div className='font-medium'>
-                  当前没有可填工时的工作项
-                </div>
-                <div className='mt-1 text-xs text-muted-foreground'>
+                <div className='font-medium'>当前没有可填工时的工作项</div>
+                <div className='text-muted-foreground mt-1 text-xs'>
                   {emptyDescription}
                 </div>
               </div>
@@ -1172,7 +1170,7 @@ function WorkHourQuickActions({
 }) {
   return (
     <div className='flex flex-col gap-2'>
-      <div className='px-1 text-xs font-medium text-muted-foreground'>
+      <div className='text-muted-foreground px-1 text-xs font-medium'>
         猜你后续要做
       </div>
       <div className='flex flex-wrap gap-2'>
@@ -1203,14 +1201,16 @@ function WorkHourFillListItem({
   const meta = [
     item.projectTitle,
     item.status,
-    item.progress === undefined ? undefined : `进度 ${formatNumber(item.progress, 0)}%`,
+    item.progress === undefined
+      ? undefined
+      : `进度 ${formatNumber(item.progress, 0)}%`,
   ].filter(Boolean)
   const isBug = item.type === 'bug' || item.typeName === '缺陷'
 
   return (
     <button
       type='button'
-      className='group flex w-full min-w-0 items-center gap-3 rounded-lg border border-transparent bg-background px-2.5 py-2.5 text-left transition-all hover:border-amber-500/30 hover:shadow-sm'
+      className='group bg-background flex w-full min-w-0 items-center gap-3 rounded-lg border border-transparent px-2.5 py-2.5 text-left transition-all hover:border-amber-500/30 hover:shadow-sm'
       onClick={onOpen}
     >
       <span
@@ -1228,11 +1228,11 @@ function WorkHourFillListItem({
           {item.title || `${item.typeName} ${item.id}`}
         </div>
         {meta.length ? (
-          <div className='mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
+          <div className='text-muted-foreground mt-1 flex min-w-0 items-center gap-1.5 text-xs'>
             {meta.map((text, index) => (
               <Fragment key={`${item.key}-${text}-${index}`}>
                 {index > 0 ? (
-                  <span className='size-1 shrink-0 rounded-full bg-muted-foreground/30' />
+                  <span className='bg-muted-foreground/30 size-1 shrink-0 rounded-full' />
                 ) : null}
                 <span className={cn(index === 0 && 'max-w-32 truncate')}>
                   {text}
@@ -1241,7 +1241,7 @@ function WorkHourFillListItem({
             ))}
           </div>
         ) : (
-          <div className='mt-1 truncate text-xs text-muted-foreground'>
+          <div className='text-muted-foreground mt-1 truncate text-xs'>
             {item.reason || '-'}
           </div>
         )}
@@ -1311,20 +1311,27 @@ function WorkHourFillSheet({
     onOpenChange?.(nextOpen)
   }
 
-  function setSelectedKey(nextKey: string) {
-    if (controlledSelectedKey === undefined) {
-      setInternalSelectedKey(nextKey)
-    }
-    onSelectedKeyChange?.(nextKey)
-  }
+  const setSelectedKey = useCallback(
+    (nextKey: string) => {
+      if (controlledSelectedKey === undefined) {
+        setInternalSelectedKey(nextKey)
+      }
+      onSelectedKeyChange?.(nextKey)
+    },
+    [controlledSelectedKey, onSelectedKeyChange]
+  )
 
   const selectedItem =
     fillableItems.find((item) => item.key === selectedKey) ?? fillableItems[0]
+  const conversationId =
+    readText(confirmationContext?.sessionId) ||
+    readText(confirmationContext?.threadId) ||
+    ''
 
   useEffect(() => {
     if (!open || selectedKey || !fillableItems[0]) return
     setSelectedKey(fillableItems[0].key)
-  }, [fillableItems, open, selectedKey])
+  }, [fillableItems, open, selectedKey, setSelectedKey])
 
   useEffect(() => {
     if (!open || !selectedItem) return
@@ -1334,7 +1341,7 @@ function WorkHourFillSheet({
     setOptionsError('')
     setSaveState('idle')
     setSaveMessage('')
-    getWorkHourOptions(selectedItem, workDate)
+    getWorkHourOptions(selectedItem, workDate, conversationId)
       .then((response) => {
         if (cancelled) return
         setOptions(response)
@@ -1354,7 +1361,7 @@ function WorkHourFillSheet({
     return () => {
       cancelled = true
     }
-  }, [open, selectedItem, workDate])
+  }, [conversationId, open, selectedItem, workDate])
 
   async function handleSave() {
     if (!selectedItem || !options || saveState === 'saving') return
@@ -1382,6 +1389,7 @@ function WorkHourFillSheet({
         executionDesc: selectedItem.type === 'task' ? description : undefined,
         description: selectedItem.type === 'bug' ? description : undefined,
         evidences,
+        idempotencyKey: options.idempotencyKey,
         confirmationContext,
       })
 
@@ -1854,7 +1862,9 @@ function TaskEvidenceFields({
                                   >
                                     <input
                                       type='checkbox'
-                                      checked={draft.projectBaseIds.includes(id)}
+                                      checked={draft.projectBaseIds.includes(
+                                        id
+                                      )}
                                       onChange={(event) =>
                                         onChange({
                                           evidences: updateEvidenceDraft(
@@ -1949,7 +1959,9 @@ function TaskEvidenceFields({
             variant='outline'
             size='sm'
             onClick={() =>
-              onChange({ evidences: [...form.evidences, createEvidenceDraft()] })
+              onChange({
+                evidences: [...form.evidences, createEvidenceDraft()],
+              })
             }
           >
             <Plus data-icon='inline-start' />
@@ -2021,7 +2033,10 @@ function validateWorkHourForm(
     return item.type === 'task' ? '请填写任务执行情况' : '请填写缺陷处理说明'
   }
   if (item.type === 'task' && progress >= 100) {
-    if (form.evidenceMode === 'select' && form.selectedEvidenceIds.length === 0) {
+    if (
+      form.evidenceMode === 'select' &&
+      form.selectedEvidenceIds.length === 0
+    ) {
       return '任务进度 100% 时请选择已有物证或新增物证'
     }
     if (form.evidenceMode === 'create') {
@@ -2215,12 +2230,13 @@ function DailyReportSectionView({
   disabled: boolean
   onReasonChange: (key: string, value: string) => void
 }) {
-  const Icon = dailyReportSectionIcon(section.kind)
-
   return (
     <section className='px-3 py-3'>
       <div className='mb-3 flex items-center gap-2'>
-        <Icon className={dailyReportSectionIconClass(section.kind)} />
+        <DailyReportSectionIcon
+          kind={section.kind}
+          className={dailyReportSectionIconClass(section.kind)}
+        />
         <h3 className='text-sm font-medium'>{section.title}</h3>
         {section.items.length ? (
           <>
@@ -2297,7 +2313,7 @@ function DailyReportWorkTable({
           overdueItem
         )
         const workTextKey = canEditWorkText
-          ? overdueItem?.key ?? dailyReportLineWorkItemKey(line, section.kind)
+          ? (overdueItem?.key ?? dailyReportLineWorkItemKey(line, section.kind))
           : undefined
         const hasWorkTextDraft = workTextKey
           ? Object.prototype.hasOwnProperty.call(overdueReasons, workTextKey)
@@ -2351,8 +2367,7 @@ function DailyReportWorkTableRow({
   const isDueToday =
     line.overdueDays === 0 &&
     (kind === 'tasks' || (kind === 'bugs' && line.status === '激活'))
-  const isMissingReason =
-    canEditWorkText && !workTextValue.trim() && !disabled
+  const isMissingReason = canEditWorkText && !workTextValue.trim() && !disabled
   const metrics = dailyReportWorkMetrics(line, kind)
   const showWorkText = kind !== 'plan'
 
@@ -2384,12 +2399,18 @@ function DailyReportWorkTableRow({
             {line.status ? (
               <Badge
                 variant='outline'
-                className={cn('font-normal', statusToneClass(line.status, kind))}
+                className={cn(
+                  'font-normal',
+                  statusToneClass(line.status, kind)
+                )}
               >
                 {line.status}
               </Badge>
             ) : (
-              <Badge variant='outline' className='text-muted-foreground font-normal'>
+              <Badge
+                variant='outline'
+                className='text-muted-foreground font-normal'
+              >
                 -
               </Badge>
             )}
@@ -2427,7 +2448,10 @@ function DailyReportWorkTableRow({
             {metrics.map((metric, index) => (
               <Fragment key={metric.label}>
                 {index > 0 ? (
-                  <Separator orientation='vertical' className='hidden h-4 sm:block' />
+                  <Separator
+                    orientation='vertical'
+                    className='hidden h-4 sm:block'
+                  />
                 ) : null}
                 <DailyReportInlineMetric
                   label={metric.label}
@@ -3018,7 +3042,7 @@ function DailyReportSummaryCards({
         </div>
       </div>
 
-      <div className='border-primary/20 bg-primary/5 flex min-w-0 flex-col justify-center rounded-lg border p-2.5 shadow-xs transition-colors hover:border-primary/30'>
+      <div className='border-primary/20 bg-primary/5 hover:border-primary/30 flex min-w-0 flex-col justify-center rounded-lg border p-2.5 shadow-xs transition-colors'>
         <div className='mb-1.5 flex items-center gap-1.5'>
           <Clock3 className='text-primary size-3' />
           <span className='text-primary text-[11px] font-medium'>
@@ -3051,7 +3075,9 @@ function DailyReportSummaryCards({
       >
         <div className='mb-1.5 flex items-center gap-1.5'>
           <StatusIcon className={cn('size-3', statusStyle.iconClass)} />
-          <span className={cn('text-[11px] font-medium', statusStyle.labelClass)}>
+          <span
+            className={cn('text-[11px] font-medium', statusStyle.labelClass)}
+          >
             提交状态
           </span>
         </div>
@@ -3128,20 +3154,26 @@ function OaMetric({
   )
 }
 
-function dailyReportSectionIcon(kind: DailyReportSectionKind) {
+function DailyReportSectionIcon({
+  kind,
+  className,
+}: {
+  kind: DailyReportSectionKind
+  className?: string
+}) {
   switch (kind) {
     case 'tasks':
-      return ListTodo
+      return <ListTodo className={className} />
     case 'bugs':
-      return Bug
+      return <Bug className={className} />
     case 'problems':
-      return HelpCircle
+      return <HelpCircle className={className} />
     case 'risks':
-      return AlertTriangle
+      return <AlertTriangle className={className} />
     case 'plan':
-      return CalendarClock
+      return <CalendarClock className={className} />
     default:
-      return FileText
+      return <FileText className={className} />
   }
 }
 
@@ -3309,8 +3341,7 @@ function dailyReportIssueLine(
     kind === 'risks'
       ? readRecordText(record, 'treatmentMeasures')
       : readRecordText(record, 'correctionMeasures')
-  const riskValue =
-    kind === 'risks' ? readRecordText(record, 'riskValue') : ''
+  const riskValue = kind === 'risks' ? readRecordText(record, 'riskValue') : ''
   const planEndDate = readRecordText(record, 'planEndDate')
   const detailParts = [
     measure,
@@ -3541,7 +3572,6 @@ function parseDailyReportLine(
   const summary = body === '暂无' || /^(\.\.\.|…)/u.test(body)
   let project: string | undefined
   let title = body
-  let detail: string | undefined
 
   const projectMatch = body.match(/^【([^】]+)】\s*(.*)$/u)
   const content = projectMatch ? projectMatch[2].trim() : body
@@ -3560,7 +3590,7 @@ function parseDailyReportLine(
 
   const sourceForMeta = rawDetail || body
   const status = extractDailyReportStatus(sourceForMeta)
-  detail = visibleDailyReportDetail(rawDetail, status)
+  const detail = visibleDailyReportDetail(rawDetail, status)
 
   return {
     id: `${kind}-${index}-${normalizeDailyReportText(rawLine).slice(0, 24)}`,
@@ -3785,7 +3815,11 @@ function parseDailyReportDraftResult(
   const unresolvedProblem = readRecordList(result.unresolvedProblem)
   const unresolvedRisk = readRecordList(result.unresolvedRisk)
   const hasStructuredContent = Boolean(
-    taskWork || bugWork || tomorrowWorkPlan || unresolvedProblem || unresolvedRisk
+    taskWork ||
+    bugWork ||
+    tomorrowWorkPlan ||
+    unresolvedProblem ||
+    unresolvedRisk
   )
   if (
     !content &&

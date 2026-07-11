@@ -15,6 +15,7 @@ import {
   LoaderCircle,
   LogIn,
   MessageSquarePlus,
+  RefreshCw,
   ShieldAlert,
   Trash2,
 } from 'lucide-react'
@@ -43,6 +44,7 @@ import {
   redirectToOaLogin,
   type AgentConfig,
 } from './api'
+import { classifyOaSessionFailure } from './api-error'
 import { AgentToolFallback, AgentToolGroup } from './tool-ui'
 import type { AgentId, ConversationSummary } from './types'
 
@@ -50,6 +52,8 @@ type RefreshOptions = {
   keepSelection?: boolean
   quiet?: boolean
 }
+
+type OaSessionState = 'checking' | 'ready' | 'login-required' | 'unavailable'
 
 const ADMIN_PORTAL_URL = '/app/admin/#/portal'
 const PROJECT_MANAGER_QUICK_ACTIONS: ThreadQuickAction[] = [
@@ -83,9 +87,11 @@ export function AgentWorkspace({
   const [conversationError, setConversationError] = useState<string | null>(
     null
   )
-  const [isCheckingOaSession, setIsCheckingOaSession] =
-    useState(requiresOaSession)
+  const [oaSessionState, setOaSessionState] = useState<OaSessionState>(
+    requiresOaSession ? 'checking' : 'ready'
+  )
   const [oaSessionMessage, setOaSessionMessage] = useState<string | null>(null)
+  const [oaSessionCheckVersion, setOaSessionCheckVersion] = useState(0)
   const refreshTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
     null
   )
@@ -106,7 +112,7 @@ export function AgentWorkspace({
       setConversationError(null)
 
       try {
-        const next = await listConversations()
+        const next = await listConversations(activeAgent)
         const nextForAgent = next.filter(
           (conversation) => conversation.agentId === activeAgentId
         )
@@ -128,12 +134,12 @@ export function AgentWorkspace({
         if (!quiet) setIsLoadingConversations(false)
       }
     },
-    [activeAgentId]
+    [activeAgent, activeAgentId]
   )
 
   useEffect(() => {
     if (!requiresOaSession) {
-      setIsCheckingOaSession(false)
+      setOaSessionState('ready')
       setOaSessionMessage(null)
       return
     }
@@ -141,38 +147,40 @@ export function AgentWorkspace({
     let cancelled = false
     let redirectTimer: ReturnType<typeof window.setTimeout> | null = null
 
-    setIsCheckingOaSession(true)
+    setOaSessionState('checking')
     setOaSessionMessage(null)
 
     void checkOaSession()
       .then((session) => {
         if (cancelled) return
-        if (session.authenticated) return
+        if (session.authenticated) {
+          setOaSessionState('ready')
+          return
+        }
 
+        setOaSessionState('login-required')
         setOaSessionMessage(
           session.message || '当前未登录，正在跳转到现有系统登录页'
         )
         redirectTimer = window.setTimeout(() => redirectToOaLogin(), 500)
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return
-        setOaSessionMessage(
-          '无法确认 OA 登录态，正在跳转到现有系统登录页'
-        )
-        redirectTimer = window.setTimeout(() => redirectToOaLogin(), 500)
-      })
-      .finally(() => {
-        if (!cancelled) setIsCheckingOaSession(false)
+        const failure = classifyOaSessionFailure(error)
+        setOaSessionState(failure.kind)
+        setOaSessionMessage(failure.message)
+        if (failure.kind === 'login-required') {
+          redirectTimer = window.setTimeout(() => redirectToOaLogin(), 500)
+        }
       })
 
     return () => {
       cancelled = true
       if (redirectTimer) window.clearTimeout(redirectTimer)
     }
-  }, [requiresOaSession])
+  }, [oaSessionCheckVersion, requiresOaSession])
 
-  const canLoadConversations =
-    !requiresOaSession || (!isCheckingOaSession && !oaSessionMessage)
+  const canLoadConversations = !requiresOaSession || oaSessionState === 'ready'
 
   useEffect(() => {
     if (!canLoadConversations) return
@@ -188,8 +196,10 @@ export function AgentWorkspace({
   }, [])
 
   const handleCreateConversation = useCallback(async () => {
-    if (requiresOaSession && (isCheckingOaSession || oaSessionMessage)) {
-      redirectToOaLogin()
+    if (requiresOaSession && oaSessionState !== 'ready') {
+      if (oaSessionState === 'login-required') {
+        redirectToOaLogin()
+      }
       return
     }
 
@@ -208,20 +218,18 @@ export function AgentWorkspace({
     } finally {
       setIsCreatingConversation(false)
     }
-  }, [activeAgent, isCheckingOaSession, oaSessionMessage, requiresOaSession])
+  }, [activeAgent, oaSessionState, requiresOaSession])
 
   const handleClearConversations = useCallback(async () => {
     if (conversations.length === 0 || isClearingConversations) return
-    const confirmed = window.confirm(
-      '确认清空当前用户的全部智能体历史会话吗？'
-    )
+    const confirmed = window.confirm('确认清空当前智能体的历史会话吗？')
     if (!confirmed) return
 
     setIsClearingConversations(true)
     setConversationError(null)
 
     try {
-      await clearConversations()
+      await clearConversations(activeAgent)
       setConversations([])
       setActiveConversationId(null)
     } catch {
@@ -229,7 +237,7 @@ export function AgentWorkspace({
     } finally {
       setIsClearingConversations(false)
     }
-  }, [conversations.length, isClearingConversations])
+  }, [activeAgent, conversations.length, isClearingConversations])
 
   const handleDeleteConversation = useCallback(
     async (conversationId: string) => {
@@ -301,6 +309,48 @@ export function AgentWorkspace({
         </div>
       </Header>
 
+      <Dialog
+        open={isLogoutDialogOpen}
+        onOpenChange={(open) => {
+          if (!isLoggingOut) setIsLogoutDialogOpen(open)
+        }}
+      >
+        <DialogContent showCloseButton={!isLoggingOut}>
+          <DialogHeader>
+            <DialogTitle>确认退出登录？</DialogTitle>
+            <DialogDescription>
+              退出后将清理当前登录态，并跳转到登录页面。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type='button'
+              variant='outline'
+              disabled={isLoggingOut}
+              onClick={() => setIsLogoutDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type='button'
+              variant='destructive'
+              disabled={isLoggingOut}
+              onClick={handleLogout}
+            >
+              {isLoggingOut ? (
+                <LoaderCircle
+                  data-icon='inline-start'
+                  className='animate-spin'
+                />
+              ) : (
+                <LogOut data-icon='inline-start' />
+              )}
+              {isLoggingOut ? '正在退出' : '确认退出'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Main fixed fluid className='p-0'>
         <div className='grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[18rem_minmax(0,1fr)]'>
           <aside className='bg-sidebar/60 hidden min-h-0 border-e md:flex md:flex-col'>
@@ -318,6 +368,7 @@ export function AgentWorkspace({
                 disabled={
                   isClearingConversations ||
                   isLoadingConversations ||
+                  (requiresOaSession && oaSessionState !== 'ready') ||
                   conversations.length === 0
                 }
                 onClick={handleClearConversations}
@@ -332,7 +383,10 @@ export function AgentWorkspace({
                 size='icon'
                 variant='ghost'
                 aria-label='新建会话'
-                disabled={isCreatingConversation}
+                disabled={
+                  isCreatingConversation ||
+                  (requiresOaSession && oaSessionState !== 'ready')
+                }
                 onClick={handleCreateConversation}
               >
                 {isCreatingConversation ? (
@@ -377,10 +431,13 @@ export function AgentWorkspace({
           </aside>
 
           <section className='bg-background min-h-0'>
-            {requiresOaSession && (isCheckingOaSession || oaSessionMessage) ? (
-              <OaLoginRedirectState
-                checking={isCheckingOaSession}
+            {requiresOaSession && oaSessionState !== 'ready' ? (
+              <OaSessionStateView
+                state={oaSessionState}
                 message={oaSessionMessage}
+                onRetry={() =>
+                  setOaSessionCheckVersion((current) => current + 1)
+                }
               />
             ) : activeConversationId ? (
               <AgentThread
@@ -437,14 +494,17 @@ function AgentThread({
   const history = useMemo<ThreadHistoryAdapter>(
     () => ({
       load: async () => {
-        const messages = await loadConversationMessages(conversationId)
+        const messages = await loadConversationMessages(
+          conversationId,
+          activeAgent
+        )
         return toMessageRepository(messages)
       },
       append: async () => {
         onConversationActivity()
       },
     }),
-    [conversationId, onConversationActivity]
+    [activeAgent, conversationId, onConversationActivity]
   )
 
   const runtime = useAgUiRuntime({
@@ -552,13 +612,18 @@ function ConversationListLoading() {
   )
 }
 
-function OaLoginRedirectState({
-  checking,
+function OaSessionStateView({
+  state,
   message,
+  onRetry,
 }: {
-  checking: boolean
+  state: Exclude<OaSessionState, 'ready'>
   message: string | null
+  onRetry: () => void
 }) {
+  const checking = state === 'checking'
+  const loginRequired = state === 'login-required'
+
   return (
     <div className='flex h-full items-center justify-center p-6'>
       <div className='flex w-full max-w-md flex-col items-center gap-4 text-center'>
@@ -570,16 +635,28 @@ function OaLoginRedirectState({
           )}
         </div>
         <div className='space-y-1'>
-          <h2 className='text-lg font-semibold'>需要登录 OA</h2>
+          <h2 className='text-lg font-semibold'>
+            {checking
+              ? '正在确认 OA 登录态'
+              : loginRequired
+                ? '需要登录 OA'
+                : 'Agent 服务暂不可用'}
+          </h2>
           <p className='text-muted-foreground text-sm'>
-            {message ||
-              '正在确认当前登录态'}
+            {message || '正在确认当前登录态'}
           </p>
         </div>
-        <Button onClick={() => redirectToOaLogin()}>
-          <LogIn />
-          去登录
-        </Button>
+        {loginRequired ? (
+          <Button onClick={() => redirectToOaLogin()}>
+            <LogIn />
+            去登录
+          </Button>
+        ) : state === 'unavailable' ? (
+          <Button variant='outline' onClick={onRetry}>
+            <RefreshCw />
+            重新检测
+          </Button>
+        ) : null}
       </div>
     </div>
   )
