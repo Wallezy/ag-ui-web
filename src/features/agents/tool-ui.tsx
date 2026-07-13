@@ -1204,8 +1204,12 @@ function WorkHourFillListItem({
     item.progress === undefined
       ? undefined
       : `进度 ${formatNumber(item.progress, 0)}%`,
+    item.executionId && item.currentWorkHour !== undefined
+      ? `已填 ${formatNumber(item.currentWorkHour)} 小时`
+      : undefined,
   ].filter(Boolean)
   const isBug = item.type === 'bug' || item.typeName === '缺陷'
+  const existing = item.operationMode === 'edit' || Boolean(item.executionId)
 
   return (
     <button
@@ -1249,6 +1253,10 @@ function WorkHourFillListItem({
       {saved ? (
         <Badge variant='secondary' className='shrink-0'>
           已保存
+        </Badge>
+      ) : existing ? (
+        <Badge variant='outline' className='shrink-0'>
+          已填写
         </Badge>
       ) : (
         <span className='hidden shrink-0 items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 transition-opacity group-hover:flex dark:text-amber-300'>
@@ -1382,6 +1390,7 @@ function WorkHourFillSheet({
       const response = await saveWorkHourExecution({
         type: selectedItem.type,
         workItemId: selectedItem.id,
+        executionId: options.executionId || selectedItem.executionId,
         workDate: form.workDate,
         workCategory: form.workCategory,
         workHour: Number(form.workHour),
@@ -1440,6 +1449,9 @@ function WorkHourFillSheet({
                   item.progress === undefined
                     ? undefined
                     : `进度 ${formatNumber(item.progress, 0)}%`,
+                  item.executionId && item.currentWorkHour !== undefined
+                    ? `已填 ${formatNumber(item.currentWorkHour)} 小时`
+                    : undefined,
                 ].filter(Boolean)
                 const isBug = item.type === 'bug' || item.typeName === '缺陷'
 
@@ -1448,7 +1460,7 @@ function WorkHourFillSheet({
                     key={item.key}
                     type='button'
                     className={cn(
-                      'group flex w-full min-w-0 items-center gap-3 rounded-lg border border-transparent bg-background px-2.5 py-2.5 text-left transition-all',
+                      'group bg-background flex w-full min-w-0 items-center gap-3 rounded-lg border border-transparent px-2.5 py-2.5 text-left transition-all',
                       selected && 'border-amber-500/30 shadow-sm'
                     )}
                     onClick={() => setSelectedKey(item.key)}
@@ -1468,20 +1480,24 @@ function WorkHourFillSheet({
                         {item.title || `${item.typeName} ${item.id}`}
                       </div>
                       {meta.length ? (
-                        <div className='mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
+                        <div className='text-muted-foreground mt-1 flex min-w-0 items-center gap-1.5 text-xs'>
                           {meta.map((text, index) => (
                             <Fragment key={`${item.key}-${text}-${index}`}>
                               {index > 0 ? (
-                                <span className='size-1 shrink-0 rounded-full bg-muted-foreground/30' />
+                                <span className='bg-muted-foreground/30 size-1 shrink-0 rounded-full' />
                               ) : null}
-                              <span className={cn(index === 0 && 'max-w-32 truncate')}>
+                              <span
+                                className={cn(
+                                  index === 0 && 'max-w-32 truncate'
+                                )}
+                              >
                                 {text}
                               </span>
                             </Fragment>
                           ))}
                         </div>
                       ) : (
-                        <div className='mt-1 truncate text-xs text-muted-foreground'>
+                        <div className='text-muted-foreground mt-1 truncate text-xs'>
                           {item.reason || '-'}
                         </div>
                       )}
@@ -1489,6 +1505,10 @@ function WorkHourFillSheet({
                     {saved ? (
                       <Badge variant='secondary' className='shrink-0'>
                         已保存
+                      </Badge>
+                    ) : item.operationMode === 'edit' || item.executionId ? (
+                      <Badge variant='outline' className='shrink-0'>
+                        已填写
                       </Badge>
                     ) : null}
                   </button>
@@ -1564,7 +1584,7 @@ function WorkHourFillSheet({
             ) : (
               <Send data-icon='inline-start' />
             )}
-            保存工时
+            {options?.operationMode === 'edit' ? '更新工时' : '保存工时'}
           </Button>
         </SheetFooter>
       </SheetContent>
@@ -1988,11 +2008,19 @@ function initialWorkHourForm(
   options: WorkHourOptionsResponse | null,
   fallbackWorkDate?: string
 ): WorkHourFormState {
+  const existing = options?.existingExecution
   const workCategory =
+    readString(existing?.workCategory) ||
     options?.defaultWorkCategory ||
     options?.workCategories.find((option) => !option.disabled)?.value ||
     ''
-  const progress = item?.progress && item.progress > 0 ? item.progress : 1
+  const existingProgress =
+    readNumber(existing?.personalProgress) ??
+    readNumber(existing?.workItemProgress)
+  const progress =
+    existingProgress ??
+    (item?.progress && item.progress > 0 ? item.progress : 1)
+  const existingWorkHour = readNumber(existing?.workHour)
   const existingEvidenceIds =
     options?.evidences
       .map((evidence) => readText(evidence.id) ?? '')
@@ -2001,11 +2029,15 @@ function initialWorkHourForm(
 
   return {
     workDate:
-      item?.workDate || options?.workDate || fallbackWorkDate || todayText(),
+      readString(existing?.workDate) ||
+      item?.workDate ||
+      options?.workDate ||
+      fallbackWorkDate ||
+      todayText(),
     workCategory,
-    workHour: '',
+    workHour: existingWorkHour === undefined ? '' : String(existingWorkHour),
     progress: String(Math.min(100, Math.max(1, Math.round(progress)))),
-    description: '',
+    description: readString(existing?.description) ?? '',
     evidenceMode: hasExistingEvidences ? 'select' : 'create',
     selectedEvidenceIds: existingEvidenceIds,
     evidences: hasExistingEvidences ? [] : [createEvidenceDraft()],
@@ -3973,6 +4005,13 @@ function readMissingWorkHourItems(value: unknown): MissingWorkHourItem[] {
         workDate: readString(item.workDate),
         currentWorkHour: readNumber(item.currentWorkHour),
         progress: readNumber(item.progress),
+        executionId: readText(item.executionId),
+        operationMode:
+          item.operationMode === 'edit'
+            ? 'edit'
+            : item.operationMode === 'create'
+              ? 'create'
+              : undefined,
         overdueDays: readNumber(item.overdueDays),
         canQuickFill: readBoolean(item.canQuickFill),
         reason: readString(item.reason),
