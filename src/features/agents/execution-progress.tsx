@@ -5,6 +5,8 @@ import {
   Circle,
   ListChecks,
   LoaderCircle,
+  MousePointerClick,
+  ShieldCheck,
   XCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -87,6 +89,12 @@ function ProgressIcon({
   }
   if (status === 'completed') {
     return <CheckCircle2 className='mt-1 size-3.5 text-emerald-600' />
+  }
+  if (status === 'waiting_user') {
+    return <MousePointerClick className='mt-1 size-3.5 text-amber-600' />
+  }
+  if (status === 'waiting_confirmation') {
+    return <ShieldCheck className='mt-1 size-3.5 text-amber-600' />
   }
   return <Circle className='text-muted-foreground mt-1 size-3.5' />
 }

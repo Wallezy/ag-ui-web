@@ -566,7 +566,7 @@ function platformStoreValue(name: string) {
         return raw
       }
     } catch {
-      continue
+
     }
   }
   return ''
@@ -765,6 +765,8 @@ function statusLabel(status: string) {
       return '已完成'
     case 'waiting_auth':
       return '等待授权'
+    case 'waiting_action':
+      return '等待操作'
     case 'error':
       return '执行失败'
     default:

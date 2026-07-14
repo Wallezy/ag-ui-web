@@ -48,10 +48,52 @@ test('ignores raw reasoning and malformed progress records', () => {
   assert.equal(steps[0]?.stepId, 'routing')
 })
 
+test('accepts planning, observation, and user waiting terminal states', () => {
+  const steps = parseExecutionProgress(
+    [
+      progressLine('planning', 'planning', 'completed', '计划已确定', 1),
+      progressLine(
+        'observation:1',
+        'observation',
+        'completed',
+        '已观察结果',
+        2
+      ),
+      progressLine(
+        'response',
+        'response',
+        'waiting_confirmation',
+        '等待确认',
+        3
+      ),
+    ].join('\n')
+  )
+
+  assert.deepEqual(
+    steps.map(({ phase, status }) => ({ phase, status })),
+    [
+      { phase: 'planning', status: 'completed' },
+      { phase: 'observation', status: 'completed' },
+      { phase: 'response', status: 'waiting_confirmation' },
+    ]
+  )
+})
+
 function progressLine(
   stepId: string,
-  phase: 'understanding' | 'routing' | 'tool' | 'response',
-  status: 'running' | 'completed' | 'failed',
+  phase:
+    | 'understanding'
+    | 'routing'
+    | 'planning'
+    | 'tool'
+    | 'observation'
+    | 'response',
+  status:
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'waiting_user'
+    | 'waiting_confirmation',
   title: string,
   sequence: number
 ) {

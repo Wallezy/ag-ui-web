@@ -221,6 +221,7 @@ const oaToolNames = new Set([
   'getMyWorkItems',
   'getWorkItemDetail',
   'generateDailyReportDraft',
+  'getActiveDailyReportDraft',
   'prepareWorkHourFill',
   'queryDailyReportStatus',
   'submitDailyReport',
@@ -248,6 +249,12 @@ const oaToolCopy: Record<
   generateDailyReportDraft: {
     title: '生成日报草稿',
     running: '正在基于真实 OA 数据生成日报草稿。',
+    badge: 'Daily Report',
+    icon: FileText,
+  },
+  getActiveDailyReportDraft: {
+    title: '读取当前日报草稿',
+    running: '正在定位当前会话的日报草稿。',
     badge: 'Daily Report',
     icon: FileText,
   },
@@ -334,13 +341,23 @@ function OaToolResultCard({ result }: { result: OaToolResult }) {
     }
   }
 
-  if (result.toolName === 'generateDailyReportDraft') {
+  if (
+    result.toolName === 'generateDailyReportDraft' ||
+    result.toolName === 'getActiveDailyReportDraft'
+  ) {
     const draft = parseDailyReportDraftResult(result.result)
     if (draft) {
       if (isDailyReportMissingWorkHours(draft)) {
         return null
       }
       return <OaDailyReportDraftCard draft={draft} message={result.message} />
+    }
+    if (
+      result.toolName === 'getActiveDailyReportDraft' &&
+      isRecord(result.result) &&
+      readBoolean(result.result.found) === false
+    ) {
+      return null
     }
   }
 
@@ -2080,8 +2097,8 @@ function validateWorkHourForm(
         if (evidence.evidenceType === '0' && !evidence.evidenceName.trim()) {
           return true
         }
-        if (evidence.evidenceType === '1' && !evidence.designId) return true
-        return false
+        return evidence.evidenceType === '1' && !evidence.designId;
+
       })
       if (invalid) {
         return '请完善物证信息（关联产物必填，且名称/设计项不能为空）'

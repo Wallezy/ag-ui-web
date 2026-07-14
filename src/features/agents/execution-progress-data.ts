@@ -1,8 +1,15 @@
 export type ExecutionProgressUpdate = {
   kind: 'execution_progress'
   stepId: string
-  phase: 'understanding' | 'routing' | 'tool' | 'response'
-  status: 'running' | 'completed' | 'failed'
+  phase:
+    | 'understanding'
+    | 'routing'
+    | 'planning'
+    | 'tool'
+    | 'observation'
+    | 'response'
+  status:
+    'running' | 'completed' | 'failed' | 'waiting_user' | 'waiting_confirmation'
   title: string
   detail: string
   sequence: number
@@ -68,11 +75,19 @@ function isPhase(value: unknown): value is ExecutionProgressUpdate['phase'] {
   return (
     value === 'understanding' ||
     value === 'routing' ||
+    value === 'planning' ||
     value === 'tool' ||
+    value === 'observation' ||
     value === 'response'
   )
 }
 
 function isStatus(value: unknown): value is ExecutionProgressUpdate['status'] {
-  return value === 'running' || value === 'completed' || value === 'failed'
+  return (
+    value === 'running' ||
+    value === 'completed' ||
+    value === 'failed' ||
+    value === 'waiting_user' ||
+    value === 'waiting_confirmation'
+  )
 }
