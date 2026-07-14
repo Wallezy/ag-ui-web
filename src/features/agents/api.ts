@@ -2,23 +2,23 @@ import type {
   ThreadAssistantMessagePart,
   ThreadMessage,
 } from '@assistant-ui/react'
-import { ApiRequestError } from './api-error'
+import { ApiRequestError } from './api-error.ts'
 import type { AgentId, ConversationSummary } from './types'
 
 const AGUI_WEATHER_ENDPOINT = '/api/agent/ag-ui'
+export const DEFAULT_AGENT_RUN_ERROR_MESSAGE = '智能体运行失败，请稍后重试。'
 
-const API_BASE_URL = import.meta.env.VITE_AGENT_API_BASE_URL ?? ''
+const API_BASE_URL = import.meta.env?.VITE_AGENT_API_BASE_URL ?? ''
 
 const DEFAULT_OA_LOGIN_URL = '/app/admin/'
 
-export const OA_LOGIN_URL =
-  import.meta.env.VITE_OA_LOGIN_URL ?? DEFAULT_OA_LOGIN_URL
+const OA_LOGIN_URL = import.meta.env?.VITE_OA_LOGIN_URL ?? DEFAULT_OA_LOGIN_URL
 
 const OA_LOGIN_REDIRECT_PARAM =
-  import.meta.env.VITE_OA_LOGIN_REDIRECT_PARAM ?? ''
+  import.meta.env?.VITE_OA_LOGIN_REDIRECT_PARAM ?? ''
 
 export const AGUI_RUN_URL =
-  import.meta.env.VITE_AGUI_WEATHER_URL ??
+  import.meta.env?.VITE_AGUI_WEATHER_URL ??
   `${API_BASE_URL}${AGUI_WEATHER_ENDPOINT}`
 
 type BackendConversationSummary = {
@@ -82,7 +82,7 @@ type RequestOptions = {
   redirectOnUnauthorized?: boolean
 }
 
-export type OaSessionStatus = {
+type OaSessionStatus = {
   authenticated: boolean
   username?: string
   tenantId?: string
@@ -91,7 +91,7 @@ export type OaSessionStatus = {
   loginUrl?: string
 }
 
-export type DailyReportConfirmationRequest = {
+type DailyReportConfirmationRequest = {
   action: 'CONFIRM' | 'ALLOW' | 'DENY' | 'REJECT'
   agentId?: string
   runId?: string
@@ -173,7 +173,7 @@ export type WorkHourOptionsResponse = {
   idempotencyKey: string
 }
 
-export type SaveWorkHourExecutionRequest = {
+type SaveWorkHourExecutionRequest = {
   type: 'task' | 'bug'
   workItemId: string
   executionId?: string
@@ -188,7 +188,7 @@ export type SaveWorkHourExecutionRequest = {
   confirmationContext?: Record<string, unknown>
 }
 
-export type SaveWorkHourExecutionResponse = {
+type SaveWorkHourExecutionResponse = {
   status: string
   toolName?: string
   auditId?: string
@@ -463,7 +463,7 @@ export async function saveWorkHourExecution(
   })
 }
 
-export function buildOaLoginUrl(returnTo = window.location.href) {
+function buildOaLoginUrl(returnTo = window.location.href) {
   const loginUrl = new URL(OA_LOGIN_URL, window.location.origin)
 
   if (OA_LOGIN_REDIRECT_PARAM) {
@@ -788,7 +788,7 @@ function formatRelativeTime(timestamp: number | string) {
   }).format(date)
 }
 
-function timelineToThreadMessages(
+export function timelineToThreadMessages(
   timeline: ConversationTimelineEntry[]
 ): ThreadMessage[] {
   const messages: ThreadMessage[] = []
@@ -796,10 +796,11 @@ function timelineToThreadMessages(
 
   const flushAssistant = () => {
     if (!assistant) return
-    const content = assistantContent(assistant)
-    if (content.length === 0) return
-    messages.push(toAssistantMessage(assistant, content))
+    const current = assistant
     assistant = undefined
+    const content = assistantContent(current)
+    if (content.length === 0 && !current.error) return
+    messages.push(toAssistantMessage(current, content))
   }
 
   for (const entry of timeline) {
@@ -868,7 +869,13 @@ function timelineToThreadMessages(
       assistant ??= createAssistant(entry)
       continue
     }
-    if (type === 'RUN_FINISHED' || type === 'RUN_ERROR') {
+    if (type === 'RUN_ERROR') {
+      assistant ??= createAssistant(entry)
+      assistant.error = runErrorMessage(event)
+      flushAssistant()
+      continue
+    }
+    if (type === 'RUN_FINISHED') {
       flushAssistant()
     }
   }
@@ -898,6 +905,7 @@ type AssistantPartOrder =
 type MutableAssistant = {
   id: string
   createdAt: Date
+  error?: string
   activeTextMessageId?: string
   textPartCounter: number
   textParts: Map<string, TextPartState>
@@ -1118,7 +1126,9 @@ function toAssistantMessage(
     role: 'assistant',
     createdAt: assistant.createdAt,
     content,
-    status: { type: 'complete', reason: 'unknown' },
+    status: assistant.error
+      ? { type: 'incomplete', reason: 'error', error: assistant.error }
+      : { type: 'complete', reason: 'unknown' },
     metadata: {
       unstable_state: null,
       unstable_annotations: [],
@@ -1127,6 +1137,11 @@ function toAssistantMessage(
       custom: {},
     },
   }
+}
+
+function runErrorMessage(event: Record<string, unknown>) {
+  const message = readString(event.message).trim()
+  return message || DEFAULT_AGENT_RUN_ERROR_MESSAGE
 }
 
 function createClientId() {
