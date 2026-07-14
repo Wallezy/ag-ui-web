@@ -81,6 +81,11 @@ import {
   type WorkHourOptionsResponse,
 } from './api'
 import { isDailyReportConfirmationAccepted } from './daily-report-confirmation'
+import {
+  parseWorkItemsResult,
+  workItemQueryPresentation,
+  type WorkItemsResult,
+} from './work-items-result'
 
 type WeatherResult = {
   temperature: number
@@ -105,14 +110,6 @@ type OaToolResult = {
   result?: Record<string, unknown>
 }
 
-type WorkItemsResult = {
-  items: Record<string, unknown>[]
-  count: number
-  user?: Record<string, unknown>
-  dateRange?: Record<string, unknown>
-  visitedProjectCount?: number
-}
-
 type OverdueReasonItem = {
   key: string
   type: string
@@ -123,6 +120,39 @@ type OverdueReasonItem = {
   process?: string
   status?: string
   overdueDays?: number
+}
+
+type DailyReportReadinessItem = {
+  code: string
+  title: string
+  description?: string
+  action?: string
+  count?: number
+}
+
+type DailyReportNextAction = {
+  action: string
+  label: string
+}
+
+type DailyReportReadiness = {
+  status: string
+  title: string
+  description?: string
+  blockers: DailyReportReadinessItem[]
+  suggestions: DailyReportReadinessItem[]
+  nextActions: DailyReportNextAction[]
+}
+
+type DailyReportReferenceSource = {
+  type: string
+  label: string
+  count: number
+}
+
+type DailyReportReferences = {
+  userContent: string[]
+  oaSources: DailyReportReferenceSource[]
 }
 
 type DailyReportDraftResult = {
@@ -144,6 +174,8 @@ type DailyReportDraftResult = {
   validationWarnings: string[]
   overdueReasonItems: OverdueReasonItem[]
   missingWorkHourItems: MissingWorkHourItem[]
+  readiness: DailyReportReadiness
+  references: DailyReportReferences
   requiresOverdueReasons: boolean
   submitReady: boolean
   requiresConfirmation: boolean
@@ -248,7 +280,7 @@ const oaToolCopy: Record<
   },
   generateDailyReportDraft: {
     title: '生成日报草稿',
-    running: '正在基于真实 OA 数据生成日报草稿。',
+    running: '正在汇总今天的工作记录并整理日报。',
     badge: 'Daily Report',
     icon: FileText,
   },
@@ -330,15 +362,15 @@ export const AgentToolFallback: ToolCallMessagePartComponent = (props) => {
 }
 
 function OaToolResultCard({ result }: { result: OaToolResult }) {
-  if (result.success === false || result.errorCode) {
-    return <OaErrorCard result={result} />
-  }
-
   if (result.toolName === 'getMyWorkItems') {
     const workItems = parseWorkItemsResult(result.result)
     if (workItems) {
       return <OaWorkItemsCard result={workItems} message={result.message} />
     }
+  }
+
+  if (result.success === false || result.errorCode) {
+    return <OaErrorCard result={result} />
   }
 
   if (
@@ -423,23 +455,51 @@ function OaWorkItemsCard({
   const visibleItems = result.items.slice(0, 8)
   const userName = readText(result.user?.userName)
   const dateRange = formatDateRange(result.dateRange)
+  const presentation = workItemQueryPresentation(result, message)
+  const queryStatus = result.completeness.status
+  const queryTone =
+    queryStatus === 'FAILED'
+      ? 'danger'
+      : queryStatus === 'PARTIAL'
+        ? 'warning'
+        : 'default'
 
   return (
     <Card className='w-full max-w-2xl gap-4 rounded-lg py-4 shadow-none'>
       <CardHeader className='gap-3 px-4 sm:px-5'>
         <div className='flex items-start gap-3'>
-          <IconFrame icon={ClipboardList} />
+          <IconFrame
+            icon={queryStatus === 'COMPLETE' ? ClipboardList : AlertTriangle}
+            tone={queryTone}
+          />
           <div className='min-w-0 flex-1'>
             <div className='flex min-w-0 flex-wrap items-center gap-2'>
-              <CardTitle className='truncate text-base'>OA 工作项</CardTitle>
-              <Badge variant='secondary'>真实 OA 数据</Badge>
+              <CardTitle className='truncate text-base'>
+                {presentation.title}
+              </CardTitle>
+              <Badge
+                variant={
+                  queryStatus === 'FAILED'
+                    ? 'destructive'
+                    : queryStatus === 'PARTIAL'
+                      ? 'outline'
+                      : 'secondary'
+                }
+                className={
+                  queryStatus === 'PARTIAL'
+                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                    : undefined
+                }
+              >
+                {presentation.badge}
+              </Badge>
             </div>
             <CardDescription className='mt-1'>
-              {message || '已读取当前用户可见的工作项'}
+              {presentation.description}
             </CardDescription>
           </div>
           <CardAction>
-            <Badge variant='outline'>{result.count} 项</Badge>
+            <Badge variant='outline'>{presentation.countLabel}</Badge>
           </CardAction>
         </div>
       </CardHeader>
@@ -458,6 +518,20 @@ function OaWorkItemsCard({
           />
         </div>
 
+        {presentation.noticeTitle && visibleItems.length ? (
+          <div className='rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-sm'>
+            <div className='flex items-start gap-2'>
+              <AlertTriangle className='mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300' />
+              <div className='min-w-0'>
+                <div className='font-medium'>{presentation.noticeTitle}</div>
+                <div className='text-muted-foreground mt-0.5 text-xs leading-5'>
+                  {presentation.noticeDescription}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {visibleItems.length ? (
           <div className='overflow-hidden rounded-md border'>
             {visibleItems.map((item, index) => (
@@ -468,8 +542,36 @@ function OaWorkItemsCard({
             ))}
           </div>
         ) : (
-          <div className='text-muted-foreground rounded-md border px-3 py-4 text-sm'>
-            当前条件下没有查询到工作项。
+          <div
+            className={cn(
+              'rounded-md border px-3 py-4 text-sm',
+              queryStatus === 'FAILED'
+                ? 'border-destructive/30 bg-destructive/5'
+                : queryStatus === 'PARTIAL'
+                  ? 'border-amber-500/30 bg-amber-500/5'
+                  : 'bg-muted/20'
+            )}
+          >
+            <div className='flex items-start gap-2'>
+              {queryStatus === 'COMPLETE' ? (
+                <ClipboardList className='text-muted-foreground mt-0.5 size-4 shrink-0' />
+              ) : (
+                <AlertTriangle
+                  className={cn(
+                    'mt-0.5 size-4 shrink-0',
+                    queryStatus === 'FAILED'
+                      ? 'text-destructive'
+                      : 'text-amber-700 dark:text-amber-300'
+                  )}
+                />
+              )}
+              <div className='min-w-0'>
+                <div className='font-medium'>{presentation.emptyTitle}</div>
+                <div className='text-muted-foreground mt-1 text-xs leading-5'>
+                  {presentation.emptyDescription}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -591,9 +693,6 @@ function OaDailyReportDraftCard({
       cancelled = true
     }
   }, [draft.draftId, draft.overdueReasonItems])
-  const validationMessages = draft.validationErrors.length
-    ? draft.validationErrors
-    : draft.validationWarnings
   const hasSubmitted =
     submitState === 'success' ||
     draft.submitted ||
@@ -612,13 +711,19 @@ function OaDailyReportDraftCard({
     submitState !== 'success'
   const canSubmit = showConfirmButton && missingOverdueReasonCount === 0
   const hasPendingOverdueReasons = missingOverdueReasonCount > 0
+  const activeBlockers = draft.readiness.blockers.filter(
+    (item) =>
+      item.code !== 'MISSING_OVERDUE_REASONS' || missingOverdueReasonCount > 0
+  )
   const hasValidationProblem =
-    validationMessages.length > 0 || !draft.submitReady
+    activeBlockers.length > 0 || draft.validationErrors.length > 0
   const needsAttention = hasValidationProblem
   const missingWorkHourItems = draft.missingWorkHourItems
-  const hasMissingWorkHours = validationMessages.some(
-    isMissingWorkHoursValidation
+  const missingWorkHourBlocker = draft.readiness.blockers.find(
+    (item) => item.code === 'MISSING_WORK_HOURS'
   )
+  const hasMissingWorkHours =
+    Boolean(missingWorkHourBlocker) || isDailyReportMissingWorkHours(draft)
   const savedWorkHourCount = savedWorkHourKeys.size
   const hasStructuredMissingWorkHours =
     hasMissingWorkHours && missingWorkHourItems.length > 0
@@ -691,13 +796,14 @@ function OaDailyReportDraftCard({
         workDate={draft.workDate}
         confirmationContext={draft.confirmationContext}
         message={
+          missingWorkHourBlocker?.description ||
           message ||
-          validationMessages[0] ||
-          'OA 提交日报要求至少一项任务或缺陷带有大于 0 的工时。'
+          '请先为一项任务或缺陷登记工时，保存后即可继续生成日报。'
         }
-        title='日报缺少必要工时'
+        title={draft.readiness.title || '先登记工时，再生成日报'}
         emptyDescription='没有拿到可直接填工时的列表，可以先去我的工作项处理，再重新生成日报草稿。'
         onRegenerate={() => threadRuntime?.append('重新生成日报草稿')}
+        references={draft.references}
       />
     )
   }
@@ -715,7 +821,7 @@ function OaDailyReportDraftCard({
   const statusText = hasSubmitted
     ? '已提交'
     : hasValidationProblem
-      ? '暂不可提交'
+      ? '待补充'
       : '待提交'
   const actionIconClass = hasValidationProblem
     ? 'bg-destructive/10 text-destructive'
@@ -725,8 +831,8 @@ function OaDailyReportDraftCard({
   const actionTitle = hasSubmitted
     ? '日报已提交'
     : hasValidationProblem
-      ? '校验未通过，无法提交'
-      : '草稿待提交'
+      ? activeBlockers[0]?.title || '还有信息待补充'
+      : '信息已齐，可以提交'
   const actionDescriptionClass = hasValidationProblem
     ? 'text-destructive'
     : hasPendingOverdueReasons
@@ -747,19 +853,29 @@ function OaDailyReportDraftCard({
                 {hasSubmitted
                   ? '日报已提交'
                   : hasValidationProblem
-                    ? '日报草稿暂不可提交'
-                    : '日报草稿待提交'}
+                    ? activeBlockers[0]?.title || '日报还需要补充信息'
+                    : '日报草稿已整理好'}
               </CardTitle>
               {hasSubmitted ? (
                 <Badge variant='secondary'>已提交</Badge>
               ) : hasValidationProblem ? (
-                <Badge variant='destructive'>校验未通过</Badge>
+                <Badge variant='secondary'>待补充</Badge>
               ) : (
-                <Badge variant='secondary'>待提交</Badge>
+                <Badge variant='secondary'>可以提交</Badge>
               )}
             </div>
             <CardDescription className='mt-1'>
-              {message || '真实 OA 数据已生成日报草稿'}
+              {hasSubmitted
+                ? 'OA 已接收本次日报。'
+                : hasValidationProblem
+                  ? activeBlockers[0]?.description ||
+                    draft.readiness.description ||
+                    message
+                  : draft.readiness.status === 'ACTION_REQUIRED'
+                    ? '需要补充的信息已填写，可以确认提交。'
+                    : draft.readiness.description ||
+                      message ||
+                      '请核对工作总结和明细，确认无误后提交。'}
             </CardDescription>
           </div>
           <CardAction>
@@ -796,6 +912,8 @@ function OaDailyReportDraftCard({
             </span>
           </label>
         </div>
+
+        <DailyReportReferencesView references={draft.references} />
 
         <div className='rounded-md border'>
           <div className='flex flex-wrap items-center justify-between gap-2 border-b px-3 py-3'>
@@ -835,17 +953,45 @@ function OaDailyReportDraftCard({
           )}
         </div>
 
-        {validationMessages.length ? (
+        {activeBlockers.length ? (
           <div className='border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-3 text-sm'>
             <div className='flex items-center gap-2 font-medium'>
               <AlertTriangle className='size-4' />
-              提交前校验
+              提交前还需要处理
             </div>
-            <ul className='mt-2 list-disc space-y-1 pl-5'>
-              {validationMessages.map((item, index) => (
-                <li key={`${item}-${index}`}>{item}</li>
+            <div className='mt-2 space-y-2'>
+              {activeBlockers.map((item) => (
+                <div key={item.code}>
+                  <div className='font-medium'>{item.title}</div>
+                  {item.description ? (
+                    <div className='mt-0.5 text-xs opacity-85'>
+                      {item.description}
+                    </div>
+                  ) : null}
+                </div>
               ))}
-            </ul>
+            </div>
+          </div>
+        ) : null}
+
+        {draft.readiness.suggestions.length ? (
+          <div className='rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-sm'>
+            <div className='flex items-center gap-2 font-medium text-amber-800 dark:text-amber-200'>
+              <HelpCircle className='size-4' />
+              可以再完善
+            </div>
+            <div className='mt-2 space-y-2'>
+              {draft.readiness.suggestions.map((item) => (
+                <div key={item.code}>
+                  <div className='font-medium'>{item.title}</div>
+                  {item.description ? (
+                    <div className='text-muted-foreground mt-0.5 text-xs'>
+                      {item.description}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
 
@@ -916,12 +1062,11 @@ function OaDailyReportDraftCard({
                     savedWorkHourCount +
                     ' 项工时，请重新生成日报草稿后再提交'
                   : missingOverdueReasonCount > 0
-                    ? `请补齐 ${missingOverdueReasonCount} 个逾期原因`
-                    : !draft.submitReady
-                      ? '需要补充 OA 数据或重新生成后再提交'
-                      : hasSubmitted
+                    ? `请填写剩余 ${missingOverdueReasonCount} 项逾期原因`
+                    : activeBlockers[0]?.description ||
+                      (hasSubmitted
                         ? 'OA 已接收本次日报'
-                        : '确认后将提交到真实 OA'}
+                        : '请最后核对工作总结和日报明细')}
               </div>
             </div>
           </div>
@@ -981,6 +1126,45 @@ function OaDailyReportDraftCard({
   )
 }
 
+function DailyReportReferencesView({
+  references,
+}: {
+  references: DailyReportReferences
+}) {
+  if (!references.userContent.length && !references.oaSources.length) {
+    return null
+  }
+
+  return (
+    <div className='bg-muted/20 rounded-md border px-3 py-3 text-sm'>
+      <div className='flex items-center gap-2 font-medium'>
+        <CornerDownRight className='text-primary size-4' />
+        本次草稿引用
+      </div>
+      {references.userContent.length ? (
+        <div className='mt-3'>
+          <div className='text-muted-foreground text-xs'>你的补充</div>
+          <div className='border-primary/30 mt-1.5 border-l-2 pl-3 leading-6 whitespace-pre-wrap'>
+            {references.userContent.join('\n')}
+          </div>
+        </div>
+      ) : null}
+      {references.oaSources.length ? (
+        <div className='mt-3'>
+          <div className='text-muted-foreground text-xs'>OA 工作数据</div>
+          <div className='mt-1.5 flex flex-wrap gap-1.5'>
+            {references.oaSources.map((source) => (
+              <Badge key={source.type} variant='outline'>
+                {source.label} {source.count}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function WorkHourFillActionCard({
   items,
   workDate,
@@ -989,6 +1173,7 @@ function WorkHourFillActionCard({
   title = '填工时',
   emptyDescription = '当前没有拿到可直接填工时的任务或缺陷，可以去我的工作项处理。',
   onRegenerate,
+  references,
 }: {
   items: MissingWorkHourItem[]
   workDate?: string
@@ -997,6 +1182,7 @@ function WorkHourFillActionCard({
   title?: string
   emptyDescription?: string
   onRegenerate?: () => void
+  references?: DailyReportReferences
 }) {
   const threadRuntime = useThreadRuntime({ optional: true })
   const [savedKeys, setSavedKeys] = useState<Set<string>>(() => new Set())
@@ -1070,6 +1256,11 @@ function WorkHourFillActionCard({
       </CardHeader>
 
       <CardContent className='flex flex-col gap-0 px-0 py-0'>
+        {references ? (
+          <div className='border-b px-4 py-4 sm:px-5'>
+            <DailyReportReferencesView references={references} />
+          </div>
+        ) : null}
         {canQuickFill ? (
           <>
             <div className='bg-muted/30 px-3 py-2'>
@@ -2097,8 +2288,7 @@ function validateWorkHourForm(
         if (evidence.evidenceType === '0' && !evidence.evidenceName.trim()) {
           return true
         }
-        return evidence.evidenceType === '1' && !evidence.designId;
-
+        return evidence.evidenceType === '1' && !evidence.designId
       })
       if (invalid) {
         return '请完善物证信息（关联产物必填，且名称/设计项不能为空）'
@@ -3826,22 +4016,6 @@ function parseOaToolResult(
   }
 }
 
-function parseWorkItemsResult(
-  result: Record<string, unknown> | undefined
-): WorkItemsResult | undefined {
-  if (!result) return undefined
-  const items = readRecordList(result.items)
-  if (!items) return undefined
-
-  return {
-    items,
-    count: readNumber(result.count) ?? items.length,
-    user: isRecord(result.user) ? result.user : undefined,
-    dateRange: isRecord(result.dateRange) ? result.dateRange : undefined,
-    visitedProjectCount: readNumber(result.visitedProjectCount),
-  }
-}
-
 function parseDailyReportDraftResult(
   result: Record<string, unknown> | undefined
 ): DailyReportDraftResult | undefined {
@@ -3863,6 +4037,18 @@ function parseDailyReportDraftResult(
   const tomorrowWorkPlan = readRecordList(result.tomorrowWorkPlan)
   const unresolvedProblem = readRecordList(result.unresolvedProblem)
   const unresolvedRisk = readRecordList(result.unresolvedRisk)
+  const readiness = readDailyReportReadiness(
+    result.readiness,
+    validationErrors,
+    validationWarnings,
+    submitReady,
+    overdueReasonItems,
+    missingWorkHourItems
+  )
+  const references = readDailyReportReferences(
+    result.references,
+    result.sourceData
+  )
   const hasStructuredContent = Boolean(
     taskWork ||
     bugWork ||
@@ -3899,6 +4085,8 @@ function parseDailyReportDraftResult(
     validationWarnings,
     overdueReasonItems,
     missingWorkHourItems,
+    readiness,
+    references,
     requiresOverdueReasons:
       readBoolean(result.requiresOverdueReasons) ??
       overdueReasonItems.length > 0,
@@ -3910,6 +4098,144 @@ function parseDailyReportDraftResult(
     confirmationContext: isRecord(result.confirmationContext)
       ? result.confirmationContext
       : undefined,
+  }
+}
+
+function readDailyReportReadiness(
+  value: unknown,
+  validationErrors: string[],
+  validationWarnings: string[],
+  submitReady: boolean,
+  overdueReasonItems: OverdueReasonItem[],
+  missingWorkHourItems: MissingWorkHourItem[]
+): DailyReportReadiness {
+  if (isRecord(value)) {
+    const blockers = readDailyReportReadinessItems(value.blockers)
+    const suggestions = readDailyReportReadinessItems(value.suggestions)
+    return {
+      status:
+        readString(value.status) ||
+        (blockers.length
+          ? 'ACTION_REQUIRED'
+          : submitReady
+            ? 'READY'
+            : 'PENDING'),
+      title:
+        readString(value.title) || (blockers[0]?.title ?? '日报草稿已整理好'),
+      description: readString(value.description),
+      blockers,
+      suggestions,
+      nextActions: readDailyReportNextActions(value.nextActions),
+    }
+  }
+
+  const blockers: DailyReportReadinessItem[] = []
+  if (
+    missingWorkHourItems.length ||
+    validationErrors.some(isMissingWorkHoursValidation)
+  ) {
+    blockers.push({
+      code: 'MISSING_WORK_HOURS',
+      title: '今天还没有有效工时',
+      description: '请先为一项任务或缺陷登记工时，保存后再重新生成日报。',
+      action: 'FILL_WORK_HOURS',
+      count: missingWorkHourItems.length || undefined,
+    })
+  } else if (validationErrors.length) {
+    blockers.push({
+      code: 'MISSING_REQUIRED_DATA',
+      title: '日报还缺少必要信息',
+      description: validationErrors.join('；'),
+    })
+  }
+  if (overdueReasonItems.length) {
+    blockers.push({
+      code: 'MISSING_OVERDUE_REASONS',
+      title: `还有 ${overdueReasonItems.length} 项逾期原因待补充`,
+      description: '请在对应任务或缺陷下填写原因，补齐后即可提交。',
+      action: 'FILL_OVERDUE_REASONS',
+      count: overdueReasonItems.length,
+    })
+  }
+  const suggestions = validationWarnings.map((description, index) => ({
+    code: `SUGGESTION_${index + 1}`,
+    title: '建议完善日报内容',
+    description,
+  }))
+  return {
+    status: blockers.length
+      ? 'ACTION_REQUIRED'
+      : submitReady
+        ? 'READY'
+        : 'PENDING',
+    title: blockers[0]?.title || '日报草稿已整理好',
+    blockers,
+    suggestions,
+    nextActions: [],
+  }
+}
+
+function readDailyReportReadinessItems(
+  value: unknown
+): DailyReportReadinessItem[] {
+  return (readRecordList(value) ?? []).map((item, index) => ({
+    code: readString(item.code) || `ITEM_${index + 1}`,
+    title: readString(item.title) || '还有信息待补充',
+    description: readString(item.description),
+    action: readString(item.action),
+    count: readNumber(item.count),
+  }))
+}
+
+function readDailyReportNextActions(value: unknown): DailyReportNextAction[] {
+  return (readRecordList(value) ?? [])
+    .map((item): DailyReportNextAction | undefined => {
+      const action = readString(item.action)
+      const label = readString(item.label)
+      return action && label ? { action, label } : undefined
+    })
+    .filter((item): item is DailyReportNextAction => Boolean(item))
+}
+
+function readDailyReportReferences(
+  value: unknown,
+  sourceData: unknown
+): DailyReportReferences {
+  if (isRecord(value)) {
+    return {
+      userContent: stringList(value.userContent),
+      oaSources: (readRecordList(value.oaSources) ?? [])
+        .map((item): DailyReportReferenceSource | undefined => {
+          const type = readString(item.type)
+          const label = readString(item.label)
+          const count = readNumber(item.count)
+          return type && label && count !== undefined
+            ? { type, label, count }
+            : undefined
+        })
+        .filter((item): item is DailyReportReferenceSource => Boolean(item)),
+    }
+  }
+
+  const counts =
+    isRecord(sourceData) && isRecord(sourceData.counts)
+      ? sourceData.counts
+      : undefined
+  if (!counts) return { userContent: [], oaSources: [] }
+  const sourceDefinitions = [
+    ['taskWork', 'TODAY_TASKS', '今日任务'],
+    ['bugWork', 'TODAY_BUGS', '今日缺陷'],
+    ['tomorrowTaskPlan', 'TOMORROW_PLAN', '明日计划'],
+    ['unresolvedProblems', 'OPEN_PROBLEMS', '待解决问题'],
+    ['unresolvedRisks', 'OPEN_RISKS', '待解决风险'],
+  ] as const
+  return {
+    userContent: [],
+    oaSources: sourceDefinitions.map(([key, type, label]) => ({
+      type,
+      label,
+      count: readNumber(counts[key]) ?? 0,
+    })),
   }
 }
 
