@@ -836,6 +836,24 @@ export function timelineToThreadMessages(
       if (assistant) endTextMessage(assistant, readString(event.messageId))
       continue
     }
+    if (type === 'REASONING_MESSAGE_START') {
+      assistant ??= createAssistant(entry)
+      startReasoningMessage(assistant, readString(event.messageId))
+      continue
+    }
+    if (type === 'REASONING_MESSAGE_CONTENT') {
+      assistant ??= createAssistant(entry)
+      appendReasoning(
+        assistant,
+        readString(event.delta),
+        readString(event.messageId)
+      )
+      continue
+    }
+    if (type === 'REASONING_MESSAGE_END') {
+      if (assistant) endReasoningMessage(assistant, readString(event.messageId))
+      continue
+    }
     if (type === 'TOOL_CALL_START') {
       assistant ??= createAssistant(entry)
       startToolCall(
@@ -889,6 +907,11 @@ type TextPartState = {
   touched: boolean
 }
 
+type ReasoningPartState = {
+  buffer: string
+  touched: boolean
+}
+
 type ToolCallState = {
   toolCallId: string
   toolName: string
@@ -900,15 +923,20 @@ type ToolCallState = {
 }
 
 type AssistantPartOrder =
-  { kind: 'text'; key: string } | { kind: 'tool-call'; toolCallId: string }
+  | { kind: 'text'; key: string }
+  | { kind: 'reasoning'; key: string }
+  | { kind: 'tool-call'; toolCallId: string }
 
 type MutableAssistant = {
   id: string
   createdAt: Date
   error?: string
   activeTextMessageId?: string
+  activeReasoningMessageId?: string
   textPartCounter: number
+  reasoningPartCounter: number
   textParts: Map<string, TextPartState>
+  reasoningParts: Map<string, ReasoningPartState>
   toolCalls: Map<string, ToolCallState>
   partOrder: AssistantPartOrder[]
 }
@@ -918,10 +946,71 @@ function createAssistant(entry: ConversationTimelineEntry): MutableAssistant {
     id: 'assistant-' + entry.id,
     createdAt: new Date(toEpochMillis(entry.timestamp) || Date.now()),
     textPartCounter: 0,
+    reasoningPartCounter: 0,
     textParts: new Map(),
+    reasoningParts: new Map(),
     toolCalls: new Map(),
     partOrder: [],
   }
+}
+
+function generateReasoningKey(assistant: MutableAssistant) {
+  assistant.reasoningPartCounter += 1
+  return 'reasoning-' + assistant.reasoningPartCounter
+}
+
+function startReasoningMessage(
+  assistant: MutableAssistant,
+  messageId?: string
+) {
+  const key = messageId || generateReasoningKey(assistant)
+  ensureReasoningPart(assistant, key)
+  assistant.activeReasoningMessageId = key
+  const entry = assistant.reasoningParts.get(key)
+  if (entry) entry.touched = true
+}
+
+function endReasoningMessage(assistant: MutableAssistant, messageId?: string) {
+  if (messageId && assistant.activeReasoningMessageId === messageId) {
+    assistant.activeReasoningMessageId = undefined
+  }
+}
+
+function appendReasoning(
+  assistant: MutableAssistant,
+  text: string,
+  messageId?: string
+) {
+  if (!text) return
+  const key = resolveReasoningMessageId(assistant, messageId)
+  const entry = assistant.reasoningParts.get(key)
+  if (!entry) return
+  entry.buffer += text
+  entry.touched = true
+}
+
+function resolveReasoningMessageId(
+  assistant: MutableAssistant,
+  messageId?: string
+) {
+  if (messageId) {
+    ensureReasoningPart(assistant, messageId)
+    assistant.activeReasoningMessageId = messageId
+    return messageId
+  }
+  if (assistant.activeReasoningMessageId) {
+    return assistant.activeReasoningMessageId
+  }
+  const generated = generateReasoningKey(assistant)
+  ensureReasoningPart(assistant, generated)
+  assistant.activeReasoningMessageId = generated
+  return generated
+}
+
+function ensureReasoningPart(assistant: MutableAssistant, key: string) {
+  if (assistant.reasoningParts.has(key)) return
+  assistant.reasoningParts.set(key, { buffer: '', touched: false })
+  assistant.partOrder.push({ kind: 'reasoning', key })
 }
 
 function generateTextKey(assistant: MutableAssistant) {
@@ -1083,6 +1172,14 @@ function assistantContent(assistant: MutableAssistant) {
       const entry = assistant.textParts.get(part.key)
       if (entry?.touched) {
         content.push({ type: 'text', text: entry.buffer })
+      }
+      continue
+    }
+
+    if (part.kind === 'reasoning') {
+      const entry = assistant.reasoningParts.get(part.key)
+      if (entry?.touched) {
+        content.push({ type: 'reasoning', text: entry.buffer })
       }
       continue
     }

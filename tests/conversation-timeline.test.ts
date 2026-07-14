@@ -144,3 +144,63 @@ test('does not leak an empty completed run into the next assistant message', () 
   assert.equal(messages[2]?.id, 'assistant-message-2')
   assert.equal(messages[2]?.createdAt.getTime(), 5_000)
 })
+
+test('restores structured execution progress before tools and response text', () => {
+  const progress =
+    '{"kind":"execution_progress","stepId":"routing","phase":"routing","status":"completed","title":"已选择执行路径","detail":"进入智能体流程","sequence":1}\n'
+  const messages = timelineToThreadMessages([
+    aguiEntry('run-start', 1_000, { type: 'RUN_STARTED' }),
+    aguiEntry('progress-start', 1_100, {
+      type: 'REASONING_MESSAGE_START',
+      messageId: 'execution-progress-run-1',
+    }),
+    aguiEntry('progress-content', 1_200, {
+      type: 'REASONING_MESSAGE_CONTENT',
+      messageId: 'execution-progress-run-1',
+      delta: progress,
+    }),
+    aguiEntry('progress-end', 1_300, {
+      type: 'REASONING_MESSAGE_END',
+      messageId: 'execution-progress-run-1',
+    }),
+    aguiEntry('tool-start', 1_400, {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tool-1',
+      toolCallName: 'getMyWorkItems',
+    }),
+    aguiEntry('tool-result', 1_500, {
+      type: 'TOOL_CALL_RESULT',
+      toolCallId: 'tool-1',
+      content: '{"success":true}',
+    }),
+    aguiEntry('text-start', 1_600, {
+      type: 'TEXT_MESSAGE_START',
+      messageId: 'reply-1',
+    }),
+    aguiEntry('text-content', 1_700, {
+      type: 'TEXT_MESSAGE_CONTENT',
+      messageId: 'reply-1',
+      delta: '处理完成',
+    }),
+    aguiEntry('run-finished', 1_800, { type: 'RUN_FINISHED' }),
+  ])
+
+  assert.equal(messages.length, 1)
+  assert.deepEqual(messages[0]?.content.map((part) => part.type), [
+    'reasoning',
+    'tool-call',
+    'text',
+  ])
+  assert.deepEqual(messages[0]?.content[0], {
+    type: 'reasoning',
+    text: progress,
+  })
+})
+
+function aguiEntry(
+  id: string,
+  timestamp: number,
+  event: Record<string, unknown>
+) {
+  return { id, kind: 'agui_event' as const, timestamp, event }
+}

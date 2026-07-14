@@ -32,6 +32,7 @@ import {
   ErrorPrimitive,
   groupPartByType,
   MessagePrimitive,
+  type ReasoningMessagePartComponent,
   SuggestionPrimitive,
   ThreadPrimitive,
   type ToolCallMessagePartComponent,
@@ -72,6 +73,7 @@ export type ThreadComponents = {
   AssistantMessage?: ComponentType | undefined;
   Welcome?: ComponentType | undefined;
   ToolFallback?: ToolCallMessagePartComponent | undefined;
+  Reasoning?: ReasoningMessagePartComponent | undefined;
   ToolGroup?:
     | ComponentType<PropsWithChildren<{ group: ThreadGroupPart }>>
     | undefined;
@@ -424,6 +426,7 @@ const AssistantMessage: FC = () => {
   const {
     ToolFallback: ToolFallbackComponent = ToolFallback,
     ToolGroup,
+    Reasoning: ReasoningComponent = Reasoning,
     ReasoningGroup,
   } = useContext(ThreadComponentsContext);
 
@@ -487,7 +490,7 @@ const AssistantMessage: FC = () => {
               case "text":
                 return <MarkdownText />;
               case "reasoning":
-                return <Reasoning {...part} />;
+                return <ReasoningComponent {...part} />;
               case "tool-call":
                 return part.toolUI ?? <ToolFallbackComponent {...part} />;
               case "data":

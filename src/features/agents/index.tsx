@@ -56,6 +56,10 @@ import {
   type AgentConfig,
 } from './api'
 import { classifyOaSessionFailure } from './api-error'
+import {
+  AgentExecutionProgress,
+  AgentExecutionProgressGroup,
+} from './execution-progress'
 import { AgentToolFallback, AgentToolGroup } from './tool-ui'
 import type { AgentId, ConversationSummary } from './types'
 
@@ -569,6 +573,8 @@ function AgentThread({
     <AssistantRuntimeProvider runtime={runtime}>
       <Thread
         components={{
+          Reasoning: AgentExecutionProgress,
+          ReasoningGroup: AgentExecutionProgressGroup,
           ToolFallback: AgentToolFallback,
           ToolGroup: AgentToolGroup,
         }}
