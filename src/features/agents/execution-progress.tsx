@@ -13,35 +13,44 @@ import { cn } from '@/lib/utils'
 import {
   parseExecutionProgress,
   type ExecutionProgressUpdate,
+  visibleExecutionProgress,
 } from './execution-progress-data'
 
 export const AgentExecutionProgress: ReasoningMessagePartComponent = ({
   text,
 }) => {
-  const steps = parseExecutionProgress(text)
+  const steps = visibleExecutionProgress(parseExecutionProgress(text))
   if (!steps.length) return null
 
   const isRunning = steps.some((step) => step.status === 'running')
+  const isWaiting = steps.some(
+    (step) =>
+      step.status === 'waiting_user' || step.status === 'waiting_confirmation'
+  )
+  const hasFailed = steps.some((step) => step.status === 'failed')
+  const label = isRunning
+    ? '正在处理'
+    : isWaiting
+      ? '等待你的操作'
+      : hasFailed
+        ? '处理未完成'
+        : '已执行'
 
   return (
-    <section
-      className='border-border/80 my-2 border-s-2 ps-3'
-      aria-label='执行进度'
-      aria-live='polite'
-    >
+    <section className='my-2' aria-label='业务处理进展' aria-live='polite'>
       <div className='text-muted-foreground flex min-h-6 items-center gap-2 text-xs font-medium'>
         {isRunning ? (
           <LoaderCircle className='size-3.5 animate-spin' />
         ) : (
           <ListChecks className='size-3.5' />
         )}
-        <span>执行进度</span>
+        <span>{label}</span>
       </div>
-      <ol className='mt-1 grid gap-1.5'>
+      <ol className='mt-1 grid gap-1'>
         {steps.map((step) => (
           <li
             key={step.stepId}
-            className='grid min-h-9 grid-cols-[16px_minmax(0,1fr)] items-start gap-2'
+            className='grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2'
           >
             <ProgressIcon status={step.status} />
             <div className='min-w-0'>
@@ -55,7 +64,7 @@ export const AgentExecutionProgress: ReasoningMessagePartComponent = ({
               >
                 {step.title}
               </div>
-              {step.detail ? (
+              {step.detail && step.status !== 'completed' ? (
                 <div className='text-muted-foreground text-xs leading-4'>
                   {step.detail}
                 </div>

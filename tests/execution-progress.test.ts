@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseExecutionProgress } from '../src/features/agents/execution-progress-data.ts'
+import {
+  parseExecutionProgress,
+  visibleExecutionProgress,
+} from '../src/features/agents/execution-progress-data.ts'
 
 test('merges progress updates for the same step while preserving first-seen order', () => {
   const steps = parseExecutionProgress(
@@ -75,6 +78,65 @@ test('accepts planning, observation, and user waiting terminal states', () => {
       { phase: 'planning', status: 'completed' },
       { phase: 'observation', status: 'completed' },
       { phase: 'response', status: 'waiting_confirmation' },
+    ]
+  )
+})
+
+test('shows real actions and user handoffs instead of internal planning narration', () => {
+  const steps = visibleExecutionProgress(
+    parseExecutionProgress(
+      [
+        progressLine(
+          'understanding',
+          'understanding',
+          'completed',
+          '已完成初步意图识别',
+          1
+        ),
+        progressLine(
+          'planning',
+          'planning',
+          'completed',
+          '执行计划已确定',
+          2
+        ),
+        progressLine(
+          'tool:1',
+          'tool',
+          'completed',
+          '日报数据已检查',
+          3
+        ),
+        progressLine(
+          'observation:1',
+          'observation',
+          'completed',
+          '已观察业务结果',
+          4
+        ),
+        progressLine(
+          'outcome',
+          'response',
+          'waiting_user',
+          '可登记工时事项已就绪',
+          5
+        ),
+        progressLine(
+          'response',
+          'response',
+          'completed',
+          '处理完成',
+          6
+        ),
+      ].join('\n')
+    )
+  )
+
+  assert.deepEqual(
+    steps.map(({ stepId, title }) => ({ stepId, title })),
+    [
+      { stepId: 'tool:1', title: '日报数据已检查' },
+      { stepId: 'outcome', title: '可登记工时事项已就绪' },
     ]
   )
 })

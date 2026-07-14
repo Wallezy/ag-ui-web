@@ -37,6 +37,18 @@ export function parseExecutionProgress(text: string): ExecutionProgressStep[] {
   )
 }
 
+export function visibleExecutionProgress(
+  steps: ExecutionProgressStep[]
+): ExecutionProgressStep[] {
+  return steps.filter(
+    (step) =>
+      step.phase === 'tool' ||
+      step.status === 'failed' ||
+      step.status === 'waiting_user' ||
+      step.status === 'waiting_confirmation'
+  )
+}
+
 function parseUpdate(line: string): ExecutionProgressUpdate | null {
   const value = line.trim()
   if (!value) return null
