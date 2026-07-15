@@ -118,6 +118,9 @@ export type DailyReportDraftStatusResponse = {
   draftId: string
   draftVersion?: number
   workDate?: string
+  operationMode?: 'create' | 'update'
+  existingReport?: boolean
+  oaReportId?: string
   status: string
   submitted?: boolean
   submitReady?: boolean

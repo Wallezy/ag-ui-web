@@ -33,6 +33,7 @@ import {
   MapPin,
   Plus,
   RefreshCw,
+  Save,
   Send,
   ShieldAlert,
   Wind,
@@ -91,6 +92,12 @@ import {
   type WorkHourOptionsResponse,
 } from './api'
 import { isDailyReportConfirmationAccepted } from './daily-report-confirmation'
+import {
+  dailyReportErrorMessage,
+  dailyReportOperationCopy,
+  dailyReportOperationMode,
+  type DailyReportOperationMode,
+} from './daily-report'
 import {
   highWorkHourConfirmation,
   highWorkHourConfirmationDetails,
@@ -179,6 +186,9 @@ type DailyReportDraftResult = {
   draftId?: string
   draftVersion?: number
   workDate?: string
+  operationMode: DailyReportOperationMode
+  existingReport: boolean
+  oaReportId?: string
   status?: string
   submitted?: boolean
   content: string
@@ -299,14 +309,14 @@ const oaToolCopy: Record<
     icon: ClipboardList,
   },
   generateDailyReportDraft: {
-    title: '生成日报草稿',
-    running: '正在汇总今天的工作记录并整理日报。',
+    title: '准备今日日报',
+    running: '正在读取今天的 OA 日报和工作记录。',
     badge: 'Daily Report',
     icon: FileText,
   },
   getActiveDailyReportDraft: {
-    title: '读取当前日报草稿',
-    running: '正在定位当前会话的日报草稿。',
+    title: '读取今天的日报',
+    running: '正在读取今天在 OA 中的日报。',
     badge: 'Daily Report',
     icon: FileText,
   },
@@ -444,10 +454,9 @@ function OaToolResultCard({ result }: { result: OaToolResult }) {
     return (
       <OaGenericResultCard
         icon={CheckCircle2}
-        title='日报提交结果'
-        badge='Submit'
-        message={result.message || '日报已提交'}
-        result={result.result}
+        title='日报保存结果'
+        badge='Saved'
+        message='日报已保存'
         tone='success'
       />
     )
@@ -659,6 +668,8 @@ function OaDailyReportDraftCard({
   message?: string
 }) {
   const threadRuntime = useThreadRuntime({ optional: true })
+  const isUpdate = draft.operationMode === 'update'
+  const operationCopy = dailyReportOperationCopy(draft.operationMode)
   const initiallySubmitted = draft.submitted || draft.status === 'SUBMITTED'
   const [serverDraft, setServerDraft] =
     useState<DailyReportDraftStatusResponse | null>(null)
@@ -668,7 +679,7 @@ function OaDailyReportDraftCard({
   const [submitResult, setSubmitResult] =
     useState<DailyReportConfirmationResponse | null>(() =>
       initiallySubmitted
-        ? submittedDailyReportResponse(draft.draftId, '日报已提交')
+        ? submittedDailyReportResponse(draft.draftId)
         : null
     )
   const [submitError, setSubmitError] = useState('')
@@ -701,7 +712,7 @@ function OaDailyReportDraftCard({
           setSubmitResult(
             submittedDailyReportResponse(
               status.draftId,
-              status.message || '日报已提交',
+              '日报已保存',
               status.result
             )
           )
@@ -776,7 +787,7 @@ function OaDailyReportDraftCard({
       setSubmitResult(response)
       if (!isDailyReportConfirmationAccepted(response)) {
         setSubmitState('error')
-        setSubmitError(response.message || response.errorCode || '日报提交失败')
+        setSubmitError(dailyReportErrorMessage(response))
         return
       }
 
@@ -794,13 +805,11 @@ function OaDailyReportDraftCard({
         submitted: true,
         overdueReasons: savedReasons,
         result: response.result,
-        message: response.message || '日报已提交',
+        message: '日报已保存',
       })
     } catch (error) {
       setSubmitState('error')
-      setSubmitError(
-        error instanceof Error ? error.message : '日报提交失败，请稍后重试'
-      )
+      setSubmitError(dailyReportErrorMessage(error))
     }
   }
 
@@ -839,20 +848,20 @@ function OaDailyReportDraftCard({
     (item) => !overdueMatches.matchedKeys.has(item.key)
   )
   const statusText = hasSubmitted
-    ? '已提交'
+    ? '已保存'
     : hasValidationProblem
       ? '待补充'
-      : '待提交'
+      : operationCopy.pendingStatus
   const actionIconClass = hasValidationProblem
     ? 'bg-destructive/10 text-destructive'
     : hasPendingOverdueReasons
       ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
       : 'bg-primary/10 text-primary'
   const actionTitle = hasSubmitted
-    ? '日报已提交'
+    ? '日报已保存'
     : hasValidationProblem
       ? activeBlockers[0]?.title || '还有信息待补充'
-      : '信息已齐，可以提交'
+      : operationCopy.readyAction
   const actionDescriptionClass = hasValidationProblem
     ? 'text-destructive'
     : hasPendingOverdueReasons
@@ -871,31 +880,37 @@ function OaDailyReportDraftCard({
             <div className='flex min-w-0 flex-wrap items-center gap-2'>
               <CardTitle className='truncate text-base'>
                 {hasSubmitted
-                  ? '日报已提交'
+                  ? '日报已保存'
                   : hasValidationProblem
                     ? activeBlockers[0]?.title || '日报还需要补充信息'
-                    : '日报草稿已整理好'}
+                    : operationCopy.readyTitle}
               </CardTitle>
               {hasSubmitted ? (
-                <Badge variant='secondary'>已提交</Badge>
+                <Badge variant='secondary'>已保存</Badge>
               ) : hasValidationProblem ? (
                 <Badge variant='secondary'>待补充</Badge>
               ) : (
-                <Badge variant='secondary'>可以提交</Badge>
+                <Badge variant='secondary'>
+                  {isUpdate ? operationCopy.pendingStatus : '可以提交'}
+                </Badge>
               )}
             </div>
             <CardDescription className='mt-1'>
               {hasSubmitted
-                ? 'OA 已接收本次日报。'
+                ? 'OA 已保存本次日报。'
                 : hasValidationProblem
                   ? activeBlockers[0]?.description ||
                     draft.readiness.description ||
                     message
                   : draft.readiness.status === 'ACTION_REQUIRED'
-                    ? '需要补充的信息已填写，可以确认提交。'
-                    : draft.readiness.description ||
-                      message ||
-                      '请核对工作总结和明细，确认无误后提交。'}
+                    ? isUpdate
+                      ? '需要补充的信息已填写，可以确认保存。'
+                      : '需要补充的信息已填写，可以确认提交。'
+                    : isUpdate
+                      ? operationCopy.description
+                      : draft.readiness.description ||
+                        message ||
+                        operationCopy.description}
             </CardDescription>
           </div>
           <CardAction>
@@ -939,13 +954,16 @@ function OaDailyReportDraftCard({
           <div className='flex flex-wrap items-center justify-between gap-2 border-b px-3 py-3'>
             <div className='min-w-0'>
               <div className='truncate text-sm font-medium'>
-                {report.title || `${draft.workDate || ''} 工作日报草稿`}
+                {report.title ||
+                  `${draft.workDate || ''} 工作日报${isUpdate ? '' : '草稿'}`}
               </div>
               <div className='text-muted-foreground mt-1 text-xs'>
                 {dailyReportItemCount(report.sections)} 项明细
               </div>
             </div>
-            <Badge variant='outline'>日报草稿</Badge>
+            <Badge variant='outline'>
+              {operationCopy.reportBadge}
+            </Badge>
           </div>
 
           {report.sections.length ? (
@@ -977,7 +995,7 @@ function OaDailyReportDraftCard({
           <div className='border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-3 text-sm'>
             <div className='flex items-center gap-2 font-medium'>
               <AlertTriangle className='size-4' />
-              提交前还需要处理
+              {isUpdate ? '保存前还需要处理' : '提交前还需要处理'}
             </div>
             <div className='mt-2 space-y-2'>
               {activeBlockers.map((item) => (
@@ -1050,13 +1068,8 @@ function OaDailyReportDraftCard({
             )}
           >
             {submitState === 'success'
-              ? submitResult?.message || '日报已提交'
-              : submitError || submitResult?.message || '日报提交失败'}
-            {submitResult?.auditId ? (
-              <div className='mt-1 text-xs opacity-80'>
-                审计编号：{submitResult.auditId}
-              </div>
-            ) : null}
+              ? '日报已保存'
+              : submitError || '日报暂未保存'}
           </div>
         ) : null}
 
@@ -1085,8 +1098,10 @@ function OaDailyReportDraftCard({
                     ? `请填写剩余 ${missingOverdueReasonCount} 项逾期原因`
                     : activeBlockers[0]?.description ||
                       (hasSubmitted
-                        ? 'OA 已接收本次日报'
-                        : '请最后核对工作总结和日报明细')}
+                        ? 'OA 已保存本次日报'
+                        : isUpdate
+                          ? '请最后核对修改后的工作总结和日报明细'
+                          : '请最后核对工作总结和日报明细')}
               </div>
             </div>
           </div>
@@ -1133,10 +1148,12 @@ function OaDailyReportDraftCard({
               >
                 {submitState === 'submitting' ? (
                   <LoaderCircle className='animate-spin' />
+                ) : isUpdate ? (
+                  <Save />
                 ) : (
                   <Send />
                 )}
-                确认提交日报
+                {operationCopy.confirmLabel}
               </Button>
             ) : null}
           </div>
@@ -3307,6 +3324,11 @@ function OaGenericResultCard({
 }
 
 function OaErrorCard({ result }: { result: OaToolResult }) {
+  const isDailyReportError =
+    result.toolName === 'generateDailyReportDraft' ||
+    result.toolName === 'getActiveDailyReportDraft' ||
+    result.toolName === 'queryDailyReportStatus' ||
+    result.toolName === 'submitDailyReport'
   const isValidationError =
     result.errorCode === 'DAILY_REPORT_VALIDATION_FAILED'
   const isWorkHourError =
@@ -3316,11 +3338,15 @@ function OaErrorCard({ result }: { result: OaToolResult }) {
   const Icon = isValidationError ? AlertTriangle : XCircle
   const title = isValidationError
     ? '日报校验未通过'
+    : isDailyReportError
+      ? '日报暂未保存'
     : isWorkHourError
       ? '工时未保存'
       : '暂时无法完成操作'
   const message = isWorkHourError
     ? workHourErrorMessage(result)
+    : isDailyReportError
+      ? dailyReportErrorMessage(result)
     : result.message || '请稍后重试，或检查当前 OA 登录状态。'
 
   return (
@@ -3336,7 +3362,7 @@ function OaErrorCard({ result }: { result: OaToolResult }) {
           </div>
         </div>
       </CardHeader>
-      {result.auditId ? (
+      {result.auditId && !isDailyReportError ? (
         <CardContent className='px-4 sm:px-5'>
           <div className='text-muted-foreground rounded-md border px-3 py-2 text-xs'>
             审计编号：{result.auditId}
@@ -3777,7 +3803,11 @@ function dailyReportContentFromDraft(
 
   const tomorrow = nextDateText(draft.workDate)
   return {
-    title: draft.workDate ? `${draft.workDate} 工作日报草稿` : '工作日报草稿',
+    title: draft.workDate
+      ? `${draft.workDate} 工作日报${draft.operationMode === 'update' ? '' : '草稿'}`
+      : draft.operationMode === 'update'
+        ? '工作日报'
+        : '工作日报草稿',
     sections: [
       dailyReportStructuredSection(
         'tasks',
@@ -4340,6 +4370,13 @@ function parseDailyReportDraftResult(
     result.references,
     result.sourceData
   )
+  const oaReportId = readString(result.oaReportId)
+  const operationMode = dailyReportOperationMode(
+    result.operationMode,
+    readBoolean(result.existingReport) === true || Boolean(oaReportId)
+  )
+  const existingReport =
+    readBoolean(result.existingReport) === true || operationMode === 'update'
   const hasStructuredContent = Boolean(
     taskWork ||
     bugWork ||
@@ -4361,6 +4398,9 @@ function parseDailyReportDraftResult(
     draftId: readString(result.draftId),
     draftVersion: readNumber(result.draftVersion),
     workDate: readString(result.workDate),
+    operationMode,
+    existingReport,
+    oaReportId,
     status: readString(result.status),
     submitted: readBoolean(result.submitted),
     content: content || '',
@@ -4680,7 +4720,7 @@ function mergeOverdueReasons(
 
 function submittedDailyReportResponse(
   draftId?: string,
-  message = '日报已提交',
+  message = '日报已保存',
   result?: Record<string, unknown>
 ): DailyReportConfirmationResponse {
   return {
