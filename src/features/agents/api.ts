@@ -154,6 +154,33 @@ export type WorkHourOption = {
   disabled?: boolean
 }
 
+export type WorkHourDateOption = {
+  date: string
+  source?: 'STANDARD' | 'SUPPLEMENT' | string
+  supplemental?: boolean
+  label?: string
+}
+
+export type WorkHourConstraints = {
+  minWorkHour?: number
+  maxWorkHour?: number | null
+  workHourScale?: number
+  minProgress?: number
+  maxProgress?: number
+  progressInteger?: boolean
+  descriptionRequired?: boolean
+  descriptionMaxLength?: number
+  evidenceRequiredProgress?: number | null
+  evidenceRequiredAtProgress?: number | null
+  highWorkHourConfirmationThreshold?: number
+  overtimeConfirmThreshold?: number
+  highWorkHourConfirmationRequired?: boolean
+  overtimeConfirmAfterHour?: number
+  overtimeConfirmTodayAfterHourExempt?: boolean
+  dateEditable?: boolean
+  retainedExistingDateAllowed?: boolean
+}
+
 export type WorkHourOptionsResponse = {
   type: 'task' | 'bug'
   workItemId: string
@@ -167,16 +194,30 @@ export type WorkHourOptionsResponse = {
   defaultWorkCategory?: string
   userWorkHours: Record<string, unknown>[]
   hiddenWorkHours: Record<string, unknown>[]
+  registeredWorkHours?: number
+  overtimeHiddenWorkHours?: number
   evidences: Record<string, unknown>[]
   projectBases: Record<string, unknown>[]
   designs: Record<string, unknown>[]
   idempotencyKey: string
+  allowedWorkDates: Array<string | WorkHourDateOption>
+  policyAllowedWorkDates?: string[]
+  supplementWorkDates?: string[]
+  supplementalWorkDates?: string[]
+  workDateOptions?: WorkHourDateOption[]
+  originalWorkDate?: string
+  retainedWorkDate?: string
+  dateEditable?: boolean
+  retainedExistingDateAllowed?: boolean
+  constraints?: WorkHourConstraints
+  policyVersion?: string
 }
 
-type SaveWorkHourExecutionRequest = {
+export type SaveWorkHourExecutionRequest = {
   type: 'task' | 'bug'
   workItemId: string
   executionId?: string
+  originalWorkDate?: string
   workDate: string
   workCategory: string
   workHour: number
@@ -185,15 +226,18 @@ type SaveWorkHourExecutionRequest = {
   description?: string
   evidences?: Record<string, unknown>[]
   idempotencyKey: string
+  highWorkHourConfirmed?: boolean
   confirmationContext?: Record<string, unknown>
 }
 
-type SaveWorkHourExecutionResponse = {
+export type SaveWorkHourExecutionResponse = {
   status: string
   toolName?: string
   auditId?: string
   errorCode?: string
+  code?: string
   message?: string
+  details?: unknown
   result?: Record<string, unknown>
 }
 
@@ -354,104 +398,26 @@ export async function getWorkHourOptions(
     MissingWorkHourItem,
     'type' | 'id' | 'workDate' | 'projectId' | 'executionId'
   >,
-  fallbackWorkDate: string | undefined,
+  requestedWorkDate: string | undefined,
   conversationId: string
 ) {
-  const workDate = item.workDate || fallbackWorkDate || currentWorkDate()
-  const workItemId = item.id
-  const detailPath = `/projectManage/${item.type}/${encodeURIComponent(workItemId)}`
-  const statsParams = {
-    startDate: workDate,
-    endDate: workDate,
-    filterWeekend: false,
+  const workDate = requestedWorkDate || item.workDate || currentWorkDate()
+  const params = new URLSearchParams({
+    type: item.type,
+    workItemId: item.id,
+    workDate,
+    conversationId,
+  })
+  if (item.projectId) params.set('projectId', item.projectId)
+  if (item.executionId) params.set('executionId', item.executionId)
+  if (item.executionId && item.workDate) {
+    params.set('originalWorkDate', item.workDate)
   }
 
-  const [
-    itemValue,
-    executionValue,
-    categoryValue,
-    userHoursValue,
-    hiddenHoursValue,
-    intent,
-  ] = await Promise.all([
-    oaGet<unknown>(detailPath),
-    oaGet<unknown>('/projectManage/workHour/queryExecutionList', { workDate }),
-    oaGet<unknown>('/admin/dict/type/workCategory'),
-    oaGet<unknown>('/projectManage/statistics/sumUserWorkHour', statsParams),
-    oaGet<unknown>('/projectManage/statistics/sumHiddenWorkHour', {
-      ...statsParams,
-      isHidden: true,
-    }),
-    request<{ idempotencyKey: string }>('/api/agent/oa/work-hours/intents', {
-      method: 'POST',
-      body: JSON.stringify({
-        type: item.type,
-        workItemId,
-        workDate,
-        conversationId,
-      }),
-    }),
-  ])
-
-  const workItem = asRecordValue(itemValue)
-  const existingExecution = selectExistingExecution(
-    toRecords(executionValue),
-    item
+  const response = await request<WorkHourOptionsResponse>(
+    `/api/agent/oa/work-hours/options?${params.toString()}`
   )
-  const executionId = firstTextValue(existingExecution.executionId)
-  const projectId = firstTextValue(item.projectId, workItem.projectId)
-  const taskType = firstTextValue(workItem.taskType, workItem.type)
-  const isTask = item.type === 'task'
-
-  const [formOptions] = await Promise.all([
-    Promise.all([
-      isTask && taskType === '2'
-        ? Promise.resolve('\u7ef4\u62a4')
-        : oaGet<unknown>('/projectManage/common/queryDefaultWorkCategory', {
-            type: isTask ? '1' : '2',
-            linkId: workItemId,
-          }),
-      isTask
-        ? oaGet<unknown>(
-            `/projectManage/taskEvidence/list/${encodeURIComponent(workItemId)}`
-          )
-        : Promise.resolve([]),
-      isTask && projectId
-        ? oaGet<unknown>('/projectManage/projectVersionBase/list', {
-            projectId,
-          })
-        : Promise.resolve([]),
-      isTask && projectId
-        ? oaGet<unknown>('/projectManage/design/list', { projectId })
-        : Promise.resolve([]),
-    ]),
-    isTask && !executionId
-      ? oaGet<unknown>(
-          `/projectManage/task/canExecute/${encodeURIComponent(workItemId)}`
-        )
-      : Promise.resolve(undefined),
-  ])
-  const [defaultCategoryValue, evidenceValue, projectBaseValue, designValue] =
-    formOptions
-
-  return {
-    type: item.type,
-    workItemId,
-    workDate,
-    item: workItem,
-    executionId: executionId || undefined,
-    operationMode: executionId ? 'edit' : 'create',
-    existingExecution,
-    canExecute: isTask ? true : undefined,
-    workCategories: toWorkHourOptions(categoryValue, item.type, taskType),
-    defaultWorkCategory: firstTextValue(defaultCategoryValue) || undefined,
-    userWorkHours: toRecords(userHoursValue),
-    hiddenWorkHours: toRecords(hiddenHoursValue),
-    evidences: toRecords(evidenceValue),
-    projectBases: toRecords(projectBaseValue),
-    designs: toRecords(designValue),
-    idempotencyKey: intent.idempotencyKey,
-  } satisfies WorkHourOptionsResponse
+  return normalizeWorkHourOptions(response)
 }
 
 export async function saveWorkHourExecution(
@@ -460,6 +426,55 @@ export async function saveWorkHourExecution(
   return request<SaveWorkHourExecutionResponse>('/api/agent/oa/work-hours', {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export async function refreshWorkHourIntent(
+  payload: Pick<
+    SaveWorkHourExecutionRequest,
+    'type' | 'workItemId' | 'executionId' | 'originalWorkDate' | 'workDate'
+  > & { conversationId: string }
+) {
+  return request<{
+    type: 'task' | 'bug'
+    workItemId: string
+    workDate: string
+    idempotencyKey: string
+  }>('/api/agent/oa/work-hours/intents', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function saveWorkHourExecutionWithIntentRefresh(
+  payload: SaveWorkHourExecutionRequest,
+  conversationId: string
+) {
+  try {
+    const response = await saveWorkHourExecution(payload)
+    if ((response.errorCode || response.code) !== 'WORK_HOUR_INTENT_INVALID') {
+      return response
+    }
+  } catch (error) {
+    if (
+      !(error instanceof ApiRequestError) ||
+      error.code !== 'WORK_HOUR_INTENT_INVALID'
+    ) {
+      throw error
+    }
+  }
+
+  const intent = await refreshWorkHourIntent({
+    type: payload.type,
+    workItemId: payload.workItemId,
+    executionId: payload.executionId,
+    originalWorkDate: payload.originalWorkDate,
+    workDate: payload.workDate,
+    conversationId,
+  })
+  return saveWorkHourExecution({
+    ...payload,
+    idempotencyKey: intent.idempotencyKey,
   })
 }
 
@@ -490,173 +505,30 @@ export async function apiFetch(url: string, requestInit: RequestInit) {
   return response
 }
 
-async function oaGet<T>(
-  path: string,
-  params: Record<string, string | number | boolean | undefined> = {}
-): Promise<T> {
-  const url = new URL(path, window.location.origin)
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  })
-
-  const response = await fetch(url.pathname + url.search, {
-    credentials: 'include',
-    headers: oaRequestHeaders(),
-  })
-  const text = await response.text()
-  let payload: unknown = text
-  if (text) {
-    try {
-      payload = JSON.parse(text)
-    } catch {
-      payload = text
-    }
-  }
-
-  const body = asRecordValue(payload)
-  const code = firstTextValue(body.code)
-  if (response.status === 401) redirectToOaLogin()
-  if (!response.ok || (Boolean(body.code) && code !== '00000')) {
-    throw new ApiRequestError(
-      response.ok ? 400 : response.status,
-      firstTextValue(body.msg, body.message) ||
-        readErrorMessage(text) ||
-        `Request failed: ${response.status}`
-    )
-  }
-
-  return (
-    Object.prototype.hasOwnProperty.call(body, 'data') ? body.data : payload
-  ) as T
-}
-
-function oaRequestHeaders() {
-  const headers = new Headers({ Accept: 'application/json' })
-  const accessToken = cookieValue('access_token')
-  const tenantId = platformStoreValue('tenantId')
-  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
-  if (tenantId) headers.set('TENANT-ID', tenantId)
-  return headers
-}
-
-function cookieValue(name: string) {
-  const prefix = name + '='
-  const item = document.cookie
-    .split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(prefix))
-  if (!item) return ''
-  try {
-    return decodeURIComponent(item.slice(prefix.length))
-  } catch {
-    return item.slice(prefix.length)
-  }
-}
-
-function platformStoreValue(name: string) {
-  for (const storage of [window.sessionStorage, window.localStorage]) {
-    try {
-      const raw = storage.getItem(`rcbp-${name}`)
-      if (!raw) continue
-      try {
-        const stored = JSON.parse(raw) as unknown
-        const record = asRecordValue(stored)
-        return firstTextValue(record.content, stored)
-      } catch {
-        return raw
-      }
-    } catch {
-
-    }
-  }
-  return ''
-}
-
-function toWorkHourOptions(
-  value: unknown,
-  type: 'task' | 'bug',
-  taskType: string
-): WorkHourOption[] {
-  const options: WorkHourOption[] = []
-  for (const item of toRecords(value)) {
-    const optionValue = firstTextValue(
-      item.value,
-      item.dictValue,
-      item.label,
-      item.name
-    )
-    if (!optionValue || (type === 'bug' && optionValue === '\u7ef4\u62a4'))
-      continue
-    options.push({
-      value: optionValue,
-      label:
-        firstTextValue(item.label, item.dictLabel, item.name, optionValue) ||
-        optionValue,
-      disabled:
-        type === 'task' && optionValue === '\u7ef4\u62a4' && taskType !== '2',
+function normalizeWorkHourOptions(
+  response: WorkHourOptionsResponse
+): WorkHourOptionsResponse {
+  const allowedWorkDates = response.allowedWorkDates?.length
+    ? response.allowedWorkDates
+    : response.workDateOptions?.length
+      ? response.workDateOptions
+      : []
+  if (allowedWorkDates.length === 0) {
+    throw new ApiRequestError(502, '暂时无法读取工时登记规则，请稍后重试。', {
+      code: 'WORK_HOUR_POLICY_UNAVAILABLE',
     })
   }
-  if (options.length > 0) return options
-  return [
-    { value: '\u5f00\u53d1', label: '\u5f00\u53d1', disabled: false },
-    { value: '\u6d4b\u8bd5', label: '\u6d4b\u8bd5', disabled: false },
-    ...(type === 'task'
-      ? [
-          {
-            value: '\u7ef4\u62a4',
-            label: '\u7ef4\u62a4',
-            disabled: taskType !== '2',
-          },
-        ]
-      : []),
-  ]
-}
 
-function selectExistingExecution(
-  executions: Record<string, unknown>[],
-  item: Pick<MissingWorkHourItem, 'type' | 'id' | 'executionId'>
-) {
-  let matched: Record<string, unknown> = {}
-  for (const execution of executions) {
-    if (
-      firstTextValue(execution.type).toLowerCase() !== item.type ||
-      firstTextValue(execution.workItemId) !== item.id
-    ) {
-      continue
-    }
-    if (
-      item.executionId &&
-      firstTextValue(execution.executionId) === item.executionId
-    ) {
-      return execution
-    }
-    if (!item.executionId) matched = execution
+  return {
+    ...response,
+    allowedWorkDates,
+    workCategories: response.workCategories ?? [],
+    userWorkHours: response.userWorkHours ?? [],
+    hiddenWorkHours: response.hiddenWorkHours ?? [],
+    evidences: response.evidences ?? [],
+    projectBases: response.projectBases ?? [],
+    designs: response.designs ?? [],
   }
-  return matched
-}
-
-function toRecords(value: unknown): Record<string, unknown>[] {
-  if (Array.isArray(value)) return value.filter(isRecordValue)
-  const record = asRecordValue(value)
-  const nested = record.records ?? record.rows ?? record.data
-  return Array.isArray(nested) ? nested.filter(isRecordValue) : []
-}
-
-function asRecordValue(value: unknown): Record<string, unknown> {
-  return isRecordValue(value) ? value : {}
-}
-
-function isRecordValue(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function firstTextValue(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === 'string' && value.trim()) return value.trim()
-    if (typeof value === 'number' && Number.isFinite(value))
-      return String(value)
-  }
-  return ''
 }
 
 function currentWorkDate() {
@@ -722,9 +594,15 @@ async function request<T>(
   })
   if (!response.ok) {
     const errorText = await response.text()
+    const errorPayload = readErrorPayload(errorText)
     const error = new ApiRequestError(
       response.status,
-      readErrorMessage(errorText) || 'Request failed: ' + response.status
+      errorPayload.message || 'Request failed: ' + response.status,
+      {
+        code: errorPayload.code,
+        details: errorPayload.details,
+        auditId: errorPayload.auditId,
+      }
     )
     if (response.status === 401 && options.redirectOnUnauthorized !== false) {
       redirectToOaLogin()
@@ -735,17 +613,33 @@ async function request<T>(
   return (text ? JSON.parse(text) : {}) as T
 }
 
-function readErrorMessage(text: string) {
+function readErrorPayload(text: string): {
+  message: string
+  code?: string
+  details?: unknown
+  auditId?: string
+} {
   const fallback = text.trim()
-  if (!fallback) return ''
+  if (!fallback) return { message: '' }
   try {
     const payload = JSON.parse(fallback) as Record<string, unknown>
     const message = typeof payload.message === 'string' ? payload.message : ''
-    const errorCode =
-      typeof payload.errorCode === 'string' ? payload.errorCode : ''
-    return [errorCode, message].filter(Boolean).join(': ') || fallback
+    const code =
+      typeof payload.errorCode === 'string'
+        ? payload.errorCode
+        : typeof payload.code === 'string'
+          ? payload.code
+          : ''
+    const auditId =
+      typeof payload.auditId === 'string' ? payload.auditId : undefined
+    return {
+      message: message || fallback,
+      code: code || undefined,
+      details: payload.details,
+      auditId,
+    }
   } catch {
-    return fallback
+    return { message: fallback }
   }
 }
 

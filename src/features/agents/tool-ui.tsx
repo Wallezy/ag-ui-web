@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
   type ReactNode,
@@ -38,6 +39,7 @@ import {
   XCircle,
   type LucideIcon,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -49,6 +51,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
@@ -74,13 +84,23 @@ import {
   getDailyReportDraftStatus,
   getWorkHourOptions,
   redirectToOaLogin,
-  saveWorkHourExecution,
+  saveWorkHourExecutionWithIntentRefresh,
   type DailyReportConfirmationResponse,
   type DailyReportDraftStatusResponse,
   type MissingWorkHourItem,
   type WorkHourOptionsResponse,
 } from './api'
 import { isDailyReportConfirmationAccepted } from './daily-report-confirmation'
+import {
+  highWorkHourConfirmation,
+  highWorkHourConfirmationDetails,
+  isAllowedWorkHourDate,
+  isHighWorkHourConfirmationRequired,
+  isWorkHourDateEditable,
+  workHourDateOptions,
+  workHourErrorMessage,
+  workHourLimits,
+} from './work-hour'
 import {
   parseWorkItemsResult,
   workItemQueryPresentation,
@@ -1510,10 +1530,15 @@ function WorkHourFillSheet({
   const [options, setOptions] = useState<WorkHourOptionsResponse | null>(null)
   const [loadingOptions, setLoadingOptions] = useState(false)
   const [optionsError, setOptionsError] = useState('')
-  const [saveState, setSaveState] = useState<
-    'idle' | 'saving' | 'success' | 'error'
-  >('idle')
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'error'>(
+    'idle'
+  )
   const [saveMessage, setSaveMessage] = useState('')
+  const [highWorkHourPrompt, setHighWorkHourPrompt] = useState<{
+    total: number
+    threshold: number
+  } | null>(null)
+  const optionsRequestId = useRef(0)
   const [form, setForm] = useState<WorkHourFormState>(() =>
     initialWorkHourForm(fillableItems[0], null, workDate)
   )
@@ -1549,43 +1574,81 @@ function WorkHourFillSheet({
     setSelectedKey(fillableItems[0].key)
   }, [fillableItems, open, selectedKey, setSelectedKey])
 
-  useEffect(() => {
-    if (!open || !selectedItem) return
+  const loadWorkHourOptions = useCallback(
+    async (item: MissingWorkHourItem, requestedDate?: string) => {
+      const requestId = ++optionsRequestId.current
+      setLoadingOptions(true)
+      setOptionsError('')
+      setSaveState('idle')
+      setSaveMessage('')
 
-    let cancelled = false
-    setLoadingOptions(true)
-    setOptionsError('')
-    setSaveState('idle')
-    setSaveMessage('')
-    getWorkHourOptions(selectedItem, workDate, conversationId)
-      .then((response) => {
-        if (cancelled) return
+      try {
+        const response = await getWorkHourOptions(
+          item,
+          requestedDate,
+          conversationId
+        )
+        if (requestId !== optionsRequestId.current) return
         setOptions(response)
-        setForm(initialWorkHourForm(selectedItem, response, workDate))
-      })
-      .catch((error) => {
-        if (cancelled) return
+        setForm(initialWorkHourForm(item, response, requestedDate || workDate))
+      } catch (error) {
+        if (requestId !== optionsRequestId.current) return
         setOptions(null)
         setOptionsError(
-          error instanceof Error ? error.message : '读取工时表单选项失败'
+          workHourErrorMessage(error, '暂时无法读取工时表单，请稍后重试。')
         )
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingOptions(false)
-      })
+      } finally {
+        if (requestId === optionsRequestId.current) setLoadingOptions(false)
+      }
+    },
+    [conversationId, workDate]
+  )
+
+  useEffect(() => {
+    if (!open || !selectedItem) return
+    void loadWorkHourOptions(selectedItem, selectedItem.workDate || workDate)
 
     return () => {
-      cancelled = true
+      optionsRequestId.current += 1
     }
-  }, [conversationId, open, selectedItem, workDate])
+  }, [loadWorkHourOptions, open, selectedItem, workDate])
 
-  async function handleSave() {
+  function handleWorkDateChange(nextWorkDate: string) {
+    if (!selectedItem || nextWorkDate === form.workDate) return
+    setForm((current) => ({ ...current, workDate: nextWorkDate }))
+    void loadWorkHourOptions(selectedItem, nextWorkDate)
+  }
+
+  async function handleSave(highWorkHourConfirmed = false) {
     if (!selectedItem || !options || saveState === 'saving') return
 
-    const validationMessage = validateWorkHourForm(selectedItem, form)
+    if (
+      options.workDate !== form.workDate ||
+      !isAllowedWorkHourDate(options, form.workDate)
+    ) {
+      setSaveState('error')
+      setSaveMessage('日期信息正在刷新，请稍后再保存。')
+      if (isAllowedWorkHourDate(options, form.workDate)) {
+        void loadWorkHourOptions(selectedItem, form.workDate)
+      }
+      return
+    }
+
+    const validationMessage = validateWorkHourForm(selectedItem, form, options)
     if (validationMessage) {
       setSaveState('error')
       setSaveMessage(validationMessage)
+      return
+    }
+
+    setSaveState('idle')
+    setSaveMessage('')
+    const highWorkHour = highWorkHourConfirmation(
+      options,
+      Number(form.workHour)
+    )
+    if (!highWorkHourConfirmed && highWorkHour.required) {
+      setHighWorkHourPrompt(highWorkHour)
       return
     }
 
@@ -1595,33 +1658,79 @@ function WorkHourFillSheet({
     const evidences = buildEvidencePayload(selectedItem, form, options)
 
     try {
-      const response = await saveWorkHourExecution({
-        type: selectedItem.type,
-        workItemId: selectedItem.id,
-        executionId: options.executionId || selectedItem.executionId,
-        workDate: form.workDate,
-        workCategory: form.workCategory,
-        workHour: Number(form.workHour),
-        progress: Number(form.progress),
-        executionDesc: selectedItem.type === 'task' ? description : undefined,
-        description: selectedItem.type === 'bug' ? description : undefined,
-        evidences,
-        idempotencyKey: options.idempotencyKey,
-        confirmationContext,
-      })
+      const response = await saveWorkHourExecutionWithIntentRefresh(
+        {
+          type: selectedItem.type,
+          workItemId: selectedItem.id,
+          executionId: options.executionId || selectedItem.executionId,
+          originalWorkDate:
+            options.originalWorkDate ||
+            selectedItem.workDate ||
+            options.workDate,
+          workDate: form.workDate,
+          workCategory: form.workCategory,
+          workHour: Number(form.workHour),
+          progress: Number(form.progress),
+          executionDesc: selectedItem.type === 'task' ? description : undefined,
+          description: selectedItem.type === 'bug' ? description : undefined,
+          evidences,
+          idempotencyKey: options.idempotencyKey,
+          highWorkHourConfirmed,
+          confirmationContext,
+        },
+        conversationId
+      )
 
-      if (response.errorCode || response.status !== 'ACCEPTED') {
+      if (
+        response.errorCode ||
+        response.code ||
+        response.status !== 'ACCEPTED'
+      ) {
+        if (isHighWorkHourConfirmationRequired(response)) {
+          setSaveState('idle')
+          setHighWorkHourPrompt(
+            highWorkHourConfirmationDetails(response, highWorkHour)
+          )
+          return
+        }
         setSaveState('error')
-        setSaveMessage(response.message || response.errorCode || '保存工时失败')
+        setSaveMessage(workHourErrorMessage(response))
         return
       }
 
       onSaved(selectedItem.key)
-      setSaveState('success')
-      setSaveMessage(response.message || '工时已保存，请重新生成日报草稿')
+      setSaveState('idle')
+      toast.success('保存成功', { position: 'top-right' })
+
+      const currentIndex = fillableItems.findIndex(
+        (item) => item.key === selectedItem.key
+      )
+      const orderedItems = [
+        ...fillableItems.slice(currentIndex + 1),
+        ...fillableItems.slice(0, currentIndex),
+      ]
+      const nextItem = orderedItems.find(
+        (item) =>
+          item.key !== selectedItem.key &&
+          !savedKeys.has(item.key) &&
+          !item.executionId &&
+          item.operationMode !== 'edit'
+      )
+      if (nextItem) {
+        setSelectedKey(nextItem.key)
+      } else {
+        setOpen(false)
+      }
     } catch (error) {
+      if (isHighWorkHourConfirmationRequired(error)) {
+        setSaveState('idle')
+        setHighWorkHourPrompt(
+          highWorkHourConfirmationDetails(error, highWorkHour)
+        )
+        return
+      }
       setSaveState('error')
-      setSaveMessage(error instanceof Error ? error.message : '保存工时失败')
+      setSaveMessage(workHourErrorMessage(error))
     }
   }
 
@@ -1667,9 +1776,11 @@ function WorkHourFillSheet({
                   <button
                     key={item.key}
                     type='button'
+                    disabled={loadingOptions || saveState === 'saving'}
                     className={cn(
                       'group bg-background flex w-full min-w-0 items-center gap-3 rounded-lg border border-transparent px-2.5 py-2.5 text-left transition-all',
-                      selected && 'border-amber-500/30 shadow-sm'
+                      selected && 'border-amber-500/30 shadow-sm',
+                      'disabled:cursor-not-allowed disabled:opacity-60'
                     )}
                     onClick={() => setSelectedKey(item.key)}
                   >
@@ -1743,29 +1854,39 @@ function WorkHourFillSheet({
                       <Skeleton className='h-28 w-full' />
                     </div>
                   ) : optionsError ? (
-                    <div className='border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-3 text-sm'>
-                      {optionsError}
+                    <div className='border-destructive/30 bg-destructive/5 rounded-md border px-3 py-3 text-sm'>
+                      <div className='text-destructive'>{optionsError}</div>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        className='mt-3'
+                        onClick={() =>
+                          void loadWorkHourOptions(
+                            selectedItem,
+                            form.workDate || selectedItem.workDate || workDate
+                          )
+                        }
+                      >
+                        <RefreshCw data-icon='inline-start' />
+                        重新加载
+                      </Button>
                     </div>
                   ) : (
                     <WorkHourFormFields
                       item={selectedItem}
                       options={options}
                       form={form}
+                      disabled={loadingOptions || saveState === 'saving'}
+                      onWorkDateChange={handleWorkDateChange}
                       onChange={(patch) =>
                         setForm((current) => ({ ...current, ...patch }))
                       }
                     />
                   )}
 
-                  {saveMessage ? (
-                    <div
-                      className={cn(
-                        'rounded-md border px-3 py-3 text-sm',
-                        saveState === 'success'
-                          ? 'bg-primary/5 text-primary'
-                          : 'border-destructive/30 bg-destructive/5 text-destructive'
-                      )}
-                    >
+                  {saveMessage && saveState === 'error' ? (
+                    <div className='border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-3 text-sm'>
                       {saveMessage}
                     </div>
                   ) : null}
@@ -1784,8 +1905,15 @@ function WorkHourFillSheet({
             暂不处理 SVN 物证；遇到必须选择 SVN 文件的任务，请回 OA 处理该物证。
           </div>
           <Button
-            onClick={handleSave}
-            disabled={!selectedItem || loadingOptions || saveState === 'saving'}
+            onClick={() => void handleSave()}
+            disabled={
+              !selectedItem ||
+              !options ||
+              loadingOptions ||
+              saveState === 'saving' ||
+              options.workDate !== form.workDate ||
+              !isAllowedWorkHourDate(options, form.workDate)
+            }
           >
             {saveState === 'saving' ? (
               <LoaderCircle data-icon='inline-start' className='animate-spin' />
@@ -1796,6 +1924,53 @@ function WorkHourFillSheet({
           </Button>
         </SheetFooter>
       </SheetContent>
+
+      <Dialog
+        open={highWorkHourPrompt !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && saveState !== 'saving') setHighWorkHourPrompt(null)
+        }}
+      >
+        <DialogContent showCloseButton={saveState !== 'saving'}>
+          <DialogHeader>
+            <DialogTitle>确认保存这条工时？</DialogTitle>
+            <DialogDescription>
+              保存后，{form.workDate} 当天累计工时将达到{' '}
+              {formatNumber(highWorkHourPrompt?.total ?? 0)} 小时，超过标准工时
+              {formatNumber(highWorkHourPrompt?.threshold ?? 7.5)}{' '}
+              小时。请确认记录无误。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type='button'
+              variant='outline'
+              disabled={saveState === 'saving'}
+              onClick={() => setHighWorkHourPrompt(null)}
+            >
+              取消
+            </Button>
+            <Button
+              type='button'
+              disabled={saveState === 'saving'}
+              onClick={() => {
+                setHighWorkHourPrompt(null)
+                void handleSave(true)
+              }}
+            >
+              {saveState === 'saving' ? (
+                <LoaderCircle
+                  data-icon='inline-start'
+                  className='animate-spin'
+                />
+              ) : (
+                <CheckCircle2 data-icon='inline-start' />
+              )}
+              确认保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Sheet>
   )
 }
@@ -1804,25 +1979,50 @@ function WorkHourFormFields({
   item,
   options,
   form,
+  disabled,
+  onWorkDateChange,
   onChange,
 }: {
   item: MissingWorkHourItem
   options: WorkHourOptionsResponse | null
   form: WorkHourFormState
+  disabled: boolean
+  onWorkDateChange: (workDate: string) => void
   onChange: (patch: Partial<WorkHourFormState>) => void
 }) {
-  const requiresEvidence = item.type === 'task' && Number(form.progress) >= 100
+  const limits = workHourLimits(options, item.type)
+  const dateOptions = workHourDateOptions(options)
+  const dateEditable = isWorkHourDateEditable(options)
+  const requiresEvidence =
+    item.type === 'task' &&
+    limits.evidenceRequiredProgress !== undefined &&
+    Number(form.progress) >= limits.evidenceRequiredProgress
 
   return (
-    <div className='flex flex-col gap-4'>
+    <fieldset
+      disabled={disabled}
+      className='flex min-w-0 flex-col gap-4 border-0 p-0'
+    >
       <div className='grid gap-3 sm:grid-cols-2'>
         <label className='flex flex-col gap-1.5 text-sm font-medium'>
           工作日期
-          <Input
-            type='date'
+          <select
             value={form.workDate}
-            onChange={(event) => onChange({ workDate: event.target.value })}
-          />
+            disabled={disabled || !dateEditable}
+            onChange={(event) => onWorkDateChange(event.target.value)}
+            className={nativeControlClassName}
+          >
+            {dateOptions.map((dateOption) => (
+              <option key={dateOption.date} value={dateOption.date}>
+                {dateOption.label || dateOption.date}
+              </option>
+            ))}
+          </select>
+          {!dateEditable ? (
+            <span className='text-muted-foreground text-xs font-normal'>
+              这条记录的登记日期不能修改
+            </span>
+          ) : null}
         </label>
         <label className='flex flex-col gap-1.5 text-sm font-medium'>
           工作类型
@@ -1847,9 +2047,9 @@ function WorkHourFormFields({
           实际工时
           <Input
             type='number'
-            min='0.1'
-            max='24'
-            step='0.1'
+            min={limits.min}
+            max={limits.max}
+            step={limits.step}
             value={form.workHour}
             onChange={(event) => onChange({ workHour: event.target.value })}
             placeholder='例如 1.5'
@@ -1859,9 +2059,9 @@ function WorkHourFormFields({
           累计进度
           <Input
             type='number'
-            min='1'
-            max='100'
-            step='1'
+            min={limits.progressMin}
+            max={limits.progressMax}
+            step={limits.progressInteger ? 1 : 'any'}
             value={form.progress}
             onChange={(event) => onChange({ progress: event.target.value })}
           />
@@ -1873,7 +2073,7 @@ function WorkHourFormFields({
         <textarea
           value={form.description}
           onChange={(event) => onChange({ description: event.target.value })}
-          maxLength={512}
+          maxLength={limits.descriptionMaxLength}
           rows={4}
           className={textareaClassName}
           placeholder={
@@ -1887,7 +2087,7 @@ function WorkHourFormFields({
       {requiresEvidence ? (
         <TaskEvidenceFields options={options} form={form} onChange={onChange} />
       ) : null}
-    </div>
+    </fieldset>
   )
 }
 
@@ -1899,12 +2099,31 @@ function WorkHourStats({
   const userHours = options?.userWorkHours ?? []
   const hiddenHours = options?.hiddenWorkHours ?? []
   const totalHours = combinedWorkHourRecords(userHours, hiddenHours)
+  const registeredHours = numberValue(options?.registeredWorkHours)
+  const overtimeHiddenHours = numberValue(options?.overtimeHiddenWorkHours)
+  const hasPolicyTotals =
+    registeredHours !== undefined || overtimeHiddenHours !== undefined
 
   return (
     <div className='bg-muted/30 flex flex-col gap-2 rounded-md border px-3 py-3 text-xs'>
       <div className='font-medium'>当天工时参考</div>
       <div className='text-muted-foreground flex flex-col gap-1'>
-        {totalHours.length ? (
+        {hasPolicyTotals ? (
+          <>
+            <span>
+              {options?.workDate} · 合计{' '}
+              {formatNumber(
+                (registeredHours ?? 0) + (overtimeHiddenHours ?? 0)
+              )}{' '}
+              小时
+            </span>
+            {(overtimeHiddenHours ?? 0) > 0 ? (
+              <span>
+                其中会议/评审 {formatNumber(overtimeHiddenHours ?? 0)} 小时
+              </span>
+            ) : null}
+          </>
+        ) : totalHours.length ? (
           totalHours.map((record) => (
             <span key={record.date}>
               {record.date} · 合计 {formatNumber(record.workHour)} 小时
@@ -1931,12 +2150,18 @@ function TaskEvidenceFields({
   const projectBases = options?.projectBases ?? []
   const designs = options?.designs ?? []
   const projectBaseGroups = groupProjectBases(projectBases)
+  const evidenceRequiredProgress = workHourLimits(
+    options,
+    'task'
+  ).evidenceRequiredProgress
 
   return (
     <div className='flex flex-col gap-3 rounded-md border px-3 py-3'>
       <div className='flex flex-wrap items-center gap-2'>
         <span className='text-sm font-medium'>关联物证</span>
-        <Badge variant='outline'>进度 100% 必填</Badge>
+        <Badge variant='outline'>
+          进度 {formatNumber(evidenceRequiredProgress ?? 100)}% 必填
+        </Badge>
       </div>
 
       <div className='grid gap-2 sm:grid-cols-2'>
@@ -2217,6 +2442,7 @@ function initialWorkHourForm(
   fallbackWorkDate?: string
 ): WorkHourFormState {
   const existing = options?.existingExecution
+  const limits = workHourLimits(options, item?.type ?? 'task')
   const workCategory =
     readString(existing?.workCategory) ||
     options?.defaultWorkCategory ||
@@ -2237,15 +2463,30 @@ function initialWorkHourForm(
 
   return {
     workDate:
+      options?.workDate ||
       readString(existing?.workDate) ||
       item?.workDate ||
-      options?.workDate ||
       fallbackWorkDate ||
       todayText(),
     workCategory,
     workHour: existingWorkHour === undefined ? '' : String(existingWorkHour),
-    progress: String(Math.min(100, Math.max(1, Math.round(progress)))),
-    description: readString(existing?.description) ?? '',
+    progress: String(
+      Math.min(
+        limits.progressMax,
+        Math.max(
+          limits.progressMin,
+          limits.progressInteger ? Math.round(progress) : progress
+        )
+      )
+    ),
+    description:
+      item?.type === 'task'
+        ? readString(existing?.executionDesc) ||
+          readString(existing?.description) ||
+          ''
+        : readString(existing?.description) ||
+          readString(existing?.executionDesc) ||
+          '',
     evidenceMode: hasExistingEvidences ? 'select' : 'create',
     selectedEvidenceIds: existingEvidenceIds,
     evidences: hasExistingEvidences ? [] : [createEvidenceDraft()],
@@ -2254,30 +2495,63 @@ function initialWorkHourForm(
 
 function validateWorkHourForm(
   item: MissingWorkHourItem,
-  form: WorkHourFormState
+  form: WorkHourFormState,
+  options: WorkHourOptionsResponse
 ) {
   const workHour = Number(form.workHour)
   const progress = Number(form.progress)
+  const limits = workHourLimits(options, item.type)
   if (!form.workDate) return '请选择工作日期'
+  if (!isAllowedWorkHourDate(options, form.workDate)) {
+    return '这个日期当前不能登记工时，请从可选日期中重新选择。'
+  }
   if (!form.workCategory) return '请选择工作类型'
-  if (!Number.isFinite(workHour) || workHour <= 0 || workHour > 24) {
-    return '工时必须大于 0 且不超过 24 小时'
+  if (!form.workHour.trim()) return '请填写实际工时'
+  if (
+    !Number.isFinite(workHour) ||
+    workHour < limits.min ||
+    (limits.max !== undefined && workHour > limits.max)
+  ) {
+    return limits.max === undefined
+      ? `工时不能小于 ${formatNumber(limits.min)} 小时`
+      : `工时需在 ${formatNumber(limits.min)} 到 ${formatNumber(limits.max)} 小时之间`
   }
-  if (!/^\d+(?:\.\d)?$/.test(form.workHour)) {
-    return '工时最多保留一位小数'
+  const decimalPlaces = Math.max(0, Math.round(Math.log10(1 / limits.step)))
+  const workHourPattern = new RegExp(
+    decimalPlaces === 0 ? '^\\d+$' : `^\\d+(?:\\.\\d{1,${decimalPlaces}})?$`
+  )
+  if (!workHourPattern.test(form.workHour)) {
+    return decimalPlaces === 0
+      ? '工时必须填写整数'
+      : `工时最多保留 ${decimalPlaces} 位小数`
   }
-  if (!Number.isFinite(progress) || progress < 1 || progress > 100) {
-    return '累计进度必须在 1 到 100 之间'
+  if (!form.progress.trim()) return '请填写累计进度'
+  if (
+    !Number.isFinite(progress) ||
+    progress < limits.progressMin ||
+    progress > limits.progressMax
+  ) {
+    return `累计进度需在 ${formatNumber(limits.progressMin)} 到 ${formatNumber(limits.progressMax)} 之间`
   }
-  if (!form.description.trim()) {
+  if (limits.progressInteger && !Number.isInteger(progress)) {
+    return '累计进度必须填写整数'
+  }
+  if (limits.descriptionRequired && !form.description.trim()) {
     return item.type === 'task' ? '请填写任务执行情况' : '请填写缺陷处理说明'
   }
-  if (item.type === 'task' && progress >= 100) {
+  if (form.description.trim().length > limits.descriptionMaxLength) {
+    return `执行说明不能超过 ${limits.descriptionMaxLength} 个字`
+  }
+  if (
+    item.type === 'task' &&
+    limits.evidenceRequiredProgress !== undefined &&
+    progress >= limits.evidenceRequiredProgress
+  ) {
     if (
       form.evidenceMode === 'select' &&
       form.selectedEvidenceIds.length === 0
     ) {
-      return '任务进度 100% 时请选择已有物证或新增物证'
+      return `任务进度达到 ${formatNumber(limits.evidenceRequiredProgress)}% 时，请选择已有物证或新增物证`
     }
     if (form.evidenceMode === 'create') {
       if (form.evidences.length === 0) {
@@ -2303,7 +2577,17 @@ function buildEvidencePayload(
   form: WorkHourFormState,
   options: WorkHourOptionsResponse
 ) {
-  if (item.type !== 'task' || Number(form.progress) < 100) return undefined
+  const evidenceRequiredProgress = workHourLimits(
+    options,
+    item.type
+  ).evidenceRequiredProgress
+  if (
+    item.type !== 'task' ||
+    evidenceRequiredProgress === undefined ||
+    Number(form.progress) < evidenceRequiredProgress
+  ) {
+    return undefined
+  }
 
   if (form.evidenceMode === 'select') {
     const selected = new Set(form.selectedEvidenceIds)
@@ -3025,7 +3309,19 @@ function OaGenericResultCard({
 function OaErrorCard({ result }: { result: OaToolResult }) {
   const isValidationError =
     result.errorCode === 'DAILY_REPORT_VALIDATION_FAILED'
+  const isWorkHourError =
+    result.errorCode?.includes('WORK_HOUR') ||
+    result.toolName === 'prepareWorkHourFill' ||
+    result.toolName === 'saveWorkHourExecution'
   const Icon = isValidationError ? AlertTriangle : XCircle
+  const title = isValidationError
+    ? '日报校验未通过'
+    : isWorkHourError
+      ? '工时未保存'
+      : '暂时无法完成操作'
+  const message = isWorkHourError
+    ? workHourErrorMessage(result)
+    : result.message || '请稍后重试，或检查当前 OA 登录状态。'
 
   return (
     <Card className='w-full max-w-xl gap-4 rounded-lg py-4 shadow-none'>
@@ -3034,14 +3330,9 @@ function OaErrorCard({ result }: { result: OaToolResult }) {
           <IconFrame icon={Icon} tone='danger' />
           <div className='min-w-0 flex-1'>
             <div className='flex min-w-0 flex-wrap items-center gap-2'>
-              <CardTitle className='truncate text-base'>
-                {isValidationError ? '日报校验未通过' : 'OA 工具执行失败'}
-              </CardTitle>
-              <Badge variant='destructive'>{result.errorCode || 'ERROR'}</Badge>
+              <CardTitle className='truncate text-base'>{title}</CardTitle>
             </div>
-            <CardDescription className='mt-1'>
-              {result.message || '请稍后重试，或检查当前 OA 登录状态。'}
-            </CardDescription>
+            <CardDescription className='mt-1'>{message}</CardDescription>
           </div>
         </div>
       </CardHeader>

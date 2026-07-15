@@ -1,10 +1,26 @@
 export class ApiRequestError extends Error {
   readonly status: number
+  readonly code?: string
+  readonly errorCode?: string
+  readonly details?: unknown
+  readonly auditId?: string
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    metadata: {
+      code?: string
+      details?: unknown
+      auditId?: string
+    } = {}
+  ) {
     super(message)
     this.name = 'ApiRequestError'
     this.status = status
+    this.code = metadata.code
+    this.errorCode = metadata.code
+    this.details = metadata.details
+    this.auditId = metadata.auditId
   }
 }
 
