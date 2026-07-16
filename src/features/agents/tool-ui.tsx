@@ -861,9 +861,11 @@ function OaDailyReportDraftCard({
     ? isUpdate
       ? '日报修改已保存'
       : '日报提交成功'
-    : hasValidationProblem
-      ? activeBlockers[0]?.title || '还有信息待补充'
-      : operationCopy.readyAction
+    : missingOverdueReasonCount > 0
+      ? `还需填写 ${missingOverdueReasonCount} 项逾期原因`
+      : hasValidationProblem
+        ? activeBlockers[0]?.title || '还有信息待补充'
+        : operationCopy.readyAction
   const actionDescriptionClass = hasValidationProblem
     ? 'text-destructive'
     : hasPendingOverdueReasons
@@ -901,7 +903,9 @@ function OaDailyReportDraftCard({
                       ? '日报修改已保存'
                       : '日报提交成功'
                     : hasValidationProblem
-                      ? activeBlockers[0]?.title || '日报还需要补充信息'
+                      ? isUpdate
+                        ? '日报修改待补充'
+                        : '日报草稿待补充'
                       : operationCopy.readyTitle}
                 </CardTitle>
                 {hasSubmitted ? (
@@ -920,9 +924,9 @@ function OaDailyReportDraftCard({
                 {hasSubmitted
                   ? `${draft.workDate ? `${draft.workDate} 的` : ''}日报已同步到 OA。`
                   : hasValidationProblem
-                    ? activeBlockers[0]?.description ||
-                      draft.readiness.description ||
-                      message
+                    ? isUpdate
+                      ? '请完成必填项，补齐后即可保存。'
+                      : '请完成必填项，补齐后即可提交。'
                     : draft.readiness.status === 'ACTION_REQUIRED'
                       ? isUpdate
                         ? '需要补充的信息已填写，可以确认保存。'
@@ -958,26 +962,6 @@ function OaDailyReportDraftCard({
 
         <CollapsibleContent className='CollapsibleContent'>
           <CardContent className='flex flex-col gap-4 px-4 py-4 sm:px-5'>
-            <div className='bg-muted/20 rounded-md border px-3 py-3 text-sm'>
-              <label className='flex flex-col gap-2'>
-                <span className='flex items-center gap-2 text-sm font-medium'>
-                  <ClipboardList className='text-primary size-4' />
-                  工作总结
-                </span>
-                <textarea
-                  value={remarkDraft}
-                  onChange={(event) => setRemarkDraft(event.target.value)}
-                  disabled={hasSubmitted}
-                  maxLength={1024}
-                  placeholder='请填写工作总结，最多1024字'
-                  className={cn(textareaClassName, 'min-h-24 resize-y')}
-                />
-                <span className='text-muted-foreground self-end text-xs'>
-                  {remarkDraft.length}/1024
-                </span>
-              </label>
-            </div>
-
             <div className='rounded-md border'>
               <div className='flex flex-wrap items-center justify-between gap-2 border-b px-3 py-3'>
                 <div className='min-w-0'>
@@ -1024,48 +1008,6 @@ function OaDailyReportDraftCard({
                 </div>
               )}
             </div>
-
-            {activeBlockers.length ? (
-              <div className='border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-3 text-sm'>
-                <div className='flex items-center gap-2 font-medium'>
-                  <AlertTriangle className='size-4' />
-                  {isUpdate ? '保存前还需要处理' : '提交前还需要处理'}
-                </div>
-                <div className='mt-2 space-y-2'>
-                  {activeBlockers.map((item) => (
-                    <div key={item.code}>
-                      <div className='font-medium'>{item.title}</div>
-                      {item.description ? (
-                        <div className='mt-0.5 text-xs opacity-85'>
-                          {item.description}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {draft.readiness.suggestions.length ? (
-              <div className='rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-sm'>
-                <div className='flex items-center gap-2 font-medium text-amber-800 dark:text-amber-200'>
-                  <HelpCircle className='size-4' />
-                  可以再完善
-                </div>
-                <div className='mt-2 space-y-2'>
-                  {draft.readiness.suggestions.map((item) => (
-                    <div key={item.code}>
-                      <div className='font-medium'>{item.title}</div>
-                      {item.description ? (
-                        <div className='text-muted-foreground mt-0.5 text-xs'>
-                          {item.description}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
 
             {unmatchedOverdueItems.length ? (
               <div className='border-destructive/30 bg-destructive/5 rounded-md border px-3 py-3 text-sm'>
@@ -1115,6 +1057,26 @@ function OaDailyReportDraftCard({
               </div>
             ) : null}
 
+            <div className='bg-muted/20 rounded-md border px-3 py-3 text-sm'>
+              <label className='flex flex-col gap-2'>
+                <span className='flex items-center gap-2 text-sm font-medium'>
+                  <ClipboardList className='text-primary size-4' />
+                  工作总结
+                </span>
+                <textarea
+                  value={remarkDraft}
+                  onChange={(event) => setRemarkDraft(event.target.value)}
+                  disabled={hasSubmitted}
+                  maxLength={1024}
+                  placeholder='请填写工作总结，最多1024字'
+                  className={cn(textareaClassName, 'min-h-24 resize-y')}
+                />
+                <span className='text-muted-foreground self-end text-xs'>
+                  {remarkDraft.length}/1024
+                </span>
+              </label>
+            </div>
+
             <div className='bg-muted/30 flex flex-col gap-3 rounded-md border px-3 py-3 sm:flex-row sm:items-center sm:justify-between'>
               <div className='flex min-w-0 items-start gap-3'>
                 <div
@@ -1137,7 +1099,7 @@ function OaDailyReportDraftCard({
                         savedWorkHourCount +
                         ' 项工时，请重新生成日报草稿后再提交'
                       : missingOverdueReasonCount > 0
-                        ? `请填写剩余 ${missingOverdueReasonCount} 项逾期原因`
+                        ? '请在上方红框中补充原因，完成后即可提交'
                         : activeBlockers[0]?.description ||
                           (hasSubmitted
                             ? 'OA 已保存本次日报'
