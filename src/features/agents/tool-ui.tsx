@@ -53,6 +53,11 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -86,18 +91,17 @@ import {
   getWorkHourOptions,
   redirectToOaLogin,
   saveWorkHourExecutionWithIntentRefresh,
-  type DailyReportConfirmationResponse,
   type DailyReportDraftStatusResponse,
   type MissingWorkHourItem,
   type WorkHourOptionsResponse,
 } from './api'
-import { isDailyReportConfirmationAccepted } from './daily-report-confirmation'
 import {
   dailyReportErrorMessage,
   dailyReportOperationCopy,
   dailyReportOperationMode,
   type DailyReportOperationMode,
 } from './daily-report'
+import { isDailyReportConfirmationAccepted } from './daily-report-confirmation'
 import {
   highWorkHourConfirmation,
   highWorkHourConfirmationDetails,
@@ -452,12 +456,13 @@ function OaToolResultCard({ result }: { result: OaToolResult }) {
 
   if (result.toolName === 'submitDailyReport') {
     return (
-      <OaGenericResultCard
-        icon={CheckCircle2}
-        title='日报保存结果'
-        badge='Saved'
-        message='日报已保存'
-        tone='success'
+      <OaDailyReportSuccessCard
+        auditId={
+          result.auditId ||
+          (isRecord(result.result)
+            ? readString(result.result.auditId)
+            : undefined)
+        }
       />
     )
   }
@@ -676,12 +681,7 @@ function OaDailyReportDraftCard({
   const [submitState, setSubmitState] = useState<
     'idle' | 'submitting' | 'success' | 'error'
   >(() => (initiallySubmitted ? 'success' : 'idle'))
-  const [submitResult, setSubmitResult] =
-    useState<DailyReportConfirmationResponse | null>(() =>
-      initiallySubmitted
-        ? submittedDailyReportResponse(draft.draftId)
-        : null
-    )
+  const [isExpanded, setIsExpanded] = useState(() => !initiallySubmitted)
   const [submitError, setSubmitError] = useState('')
   const [overdueReasons, setOverdueReasons] = useState<Record<string, string>>(
     () => initialOverdueReasons(draft.overdueReasonItems, draft.overdueReasons)
@@ -709,13 +709,7 @@ function OaDailyReportDraftCard({
         if (status.submitted || status.status === 'SUBMITTED') {
           setSubmitState('success')
           setSubmitError('')
-          setSubmitResult(
-            submittedDailyReportResponse(
-              status.draftId,
-              '日报已保存',
-              status.result
-            )
-          )
+          setIsExpanded(false)
         }
       })
       .catch(() => undefined)
@@ -784,7 +778,6 @@ function OaDailyReportDraftCard({
         },
         draft.confirmEndpoint || '/api/agent/confirm'
       )
-      setSubmitResult(response)
       if (!isDailyReportConfirmationAccepted(response)) {
         setSubmitState('error')
         setSubmitError(dailyReportErrorMessage(response))
@@ -806,6 +799,11 @@ function OaDailyReportDraftCard({
         overdueReasons: savedReasons,
         result: response.result,
         message: '日报已保存',
+      })
+      setIsExpanded(false)
+      toast.success(isUpdate ? '日报修改已保存' : '日报提交成功', {
+        description: '已同步到 OA',
+        position: 'top-right',
       })
     } catch (error) {
       setSubmitState('error')
@@ -848,7 +846,9 @@ function OaDailyReportDraftCard({
     (item) => !overdueMatches.matchedKeys.has(item.key)
   )
   const statusText = hasSubmitted
-    ? '已保存'
+    ? isUpdate
+      ? '已保存'
+      : '已提交'
     : hasValidationProblem
       ? '待补充'
       : operationCopy.pendingStatus
@@ -858,7 +858,9 @@ function OaDailyReportDraftCard({
       ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
       : 'bg-primary/10 text-primary'
   const actionTitle = hasSubmitted
-    ? '日报已保存'
+    ? isUpdate
+      ? '日报修改已保存'
+      : '日报提交成功'
     : hasValidationProblem
       ? activeBlockers[0]?.title || '还有信息待补充'
       : operationCopy.readyAction
@@ -869,297 +871,343 @@ function OaDailyReportDraftCard({
       : 'text-muted-foreground'
 
   return (
-    <Card className='w-full max-w-3xl gap-0 overflow-hidden rounded-lg py-0 shadow-none'>
-      <CardHeader className='border-b px-4 py-4 sm:px-5'>
-        <div className='flex items-start gap-3'>
-          <IconFrame
-            icon={needsAttention ? AlertTriangle : FileText}
-            tone={needsAttention ? 'warning' : 'default'}
-          />
-          <div className='min-w-0 flex-1'>
-            <div className='flex min-w-0 flex-wrap items-center gap-2'>
-              <CardTitle className='truncate text-base'>
-                {hasSubmitted
-                  ? '日报已保存'
-                  : hasValidationProblem
-                    ? activeBlockers[0]?.title || '日报还需要补充信息'
-                    : operationCopy.readyTitle}
-              </CardTitle>
-              {hasSubmitted ? (
-                <Badge variant='secondary'>已保存</Badge>
-              ) : hasValidationProblem ? (
-                <Badge variant='secondary'>待补充</Badge>
-              ) : (
-                <Badge variant='secondary'>
-                  {isUpdate ? operationCopy.pendingStatus : '可以提交'}
-                </Badge>
-              )}
-            </div>
-            <CardDescription className='mt-1'>
-              {hasSubmitted
-                ? 'OA 已保存本次日报。'
-                : hasValidationProblem
-                  ? activeBlockers[0]?.description ||
-                    draft.readiness.description ||
-                    message
-                  : draft.readiness.status === 'ACTION_REQUIRED'
-                    ? isUpdate
-                      ? '需要补充的信息已填写，可以确认保存。'
-                      : '需要补充的信息已填写，可以确认提交。'
-                    : isUpdate
-                      ? operationCopy.description
-                      : draft.readiness.description ||
-                        message ||
-                        operationCopy.description}
-            </CardDescription>
-          </div>
-          <CardAction>
-            <Badge variant='outline'>Daily Report</Badge>
-          </CardAction>
-        </div>
-      </CardHeader>
-
-      <CardContent className='flex flex-col gap-4 px-4 py-4 sm:px-5'>
-        <DailyReportSummaryCards
-          workDate={draft.workDate || '-'}
-          workHourStats={workHourStats}
-          statusText={statusText}
-          hasSubmitted={hasSubmitted}
-          hasValidationProblem={hasValidationProblem}
-        />
-
-        <div className='bg-muted/20 rounded-md border px-3 py-3 text-sm'>
-          <label className='flex flex-col gap-2'>
-            <span className='flex items-center gap-2 text-sm font-medium'>
-              <ClipboardList className='text-primary size-4' />
-              工作总结
-            </span>
-            <textarea
-              value={remarkDraft}
-              onChange={(event) => setRemarkDraft(event.target.value)}
-              disabled={hasSubmitted}
-              maxLength={1024}
-              placeholder='请填写工作总结，最多1024字'
-              className={cn(textareaClassName, 'min-h-24 resize-y')}
+    <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
+      <Card className='w-full max-w-3xl gap-0 overflow-hidden rounded-lg py-0 shadow-none'>
+        <CardHeader
+          className={cn('px-4 py-4 sm:px-5', isExpanded && 'border-b')}
+        >
+          <div className='flex items-start gap-3'>
+            <IconFrame
+              icon={
+                hasSubmitted
+                  ? CheckCircle2
+                  : needsAttention
+                    ? AlertTriangle
+                    : FileText
+              }
+              tone={
+                hasSubmitted
+                  ? 'success'
+                  : needsAttention
+                    ? 'warning'
+                    : 'default'
+              }
             />
-            <span className='text-muted-foreground self-end text-xs'>
-              {remarkDraft.length}/1024
-            </span>
-          </label>
-        </div>
-
-        <DailyReportReferencesView references={draft.references} />
-
-        <div className='rounded-md border'>
-          <div className='flex flex-wrap items-center justify-between gap-2 border-b px-3 py-3'>
-            <div className='min-w-0'>
-              <div className='truncate text-sm font-medium'>
-                {report.title ||
-                  `${draft.workDate || ''} 工作日报${isUpdate ? '' : '草稿'}`}
-              </div>
-              <div className='text-muted-foreground mt-1 text-xs'>
-                {dailyReportItemCount(report.sections)} 项明细
-              </div>
-            </div>
-            <Badge variant='outline'>
-              {operationCopy.reportBadge}
-            </Badge>
-          </div>
-
-          {report.sections.length ? (
-            <div className='divide-y'>
-              {report.sections.map((section) => (
-                <DailyReportSectionView
-                  key={section.id}
-                  section={section}
-                  overdueMatches={overdueMatches}
-                  overdueReasons={overdueReasons}
-                  disabled={hasSubmitted}
-                  onReasonChange={(key, value) =>
-                    setOverdueReasons((current) => ({
-                      ...current,
-                      [key]: value,
-                    }))
-                  }
-                />
-              ))}
-            </div>
-          ) : (
-            <div className='bg-muted/30 px-3 py-3 text-sm leading-6 whitespace-pre-wrap'>
-              {draft.content || '草稿内容为空'}
-            </div>
-          )}
-        </div>
-
-        {activeBlockers.length ? (
-          <div className='border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-3 text-sm'>
-            <div className='flex items-center gap-2 font-medium'>
-              <AlertTriangle className='size-4' />
-              {isUpdate ? '保存前还需要处理' : '提交前还需要处理'}
-            </div>
-            <div className='mt-2 space-y-2'>
-              {activeBlockers.map((item) => (
-                <div key={item.code}>
-                  <div className='font-medium'>{item.title}</div>
-                  {item.description ? (
-                    <div className='mt-0.5 text-xs opacity-85'>
-                      {item.description}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {draft.readiness.suggestions.length ? (
-          <div className='rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-sm'>
-            <div className='flex items-center gap-2 font-medium text-amber-800 dark:text-amber-200'>
-              <HelpCircle className='size-4' />
-              可以再完善
-            </div>
-            <div className='mt-2 space-y-2'>
-              {draft.readiness.suggestions.map((item) => (
-                <div key={item.code}>
-                  <div className='font-medium'>{item.title}</div>
-                  {item.description ? (
-                    <div className='text-muted-foreground mt-0.5 text-xs'>
-                      {item.description}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {unmatchedOverdueItems.length ? (
-          <div className='border-destructive/30 bg-destructive/5 rounded-md border px-3 py-3 text-sm'>
-            <div className='text-destructive flex items-center gap-2 font-medium'>
-              <AlertTriangle className='size-4' />
-              待补充逾期原因
-            </div>
-            <div className='mt-3 flex flex-col gap-3'>
-              {unmatchedOverdueItems.map((item) => (
-                <OverdueReasonInput
-                  key={item.key}
-                  item={item}
-                  value={overdueReasons[item.key] ?? ''}
-                  disabled={hasSubmitted}
-                  onChange={(value) =>
-                    setOverdueReasons((current) => ({
-                      ...current,
-                      [item.key]: value,
-                    }))
-                  }
-                />
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {submitResult || submitError ? (
-          <div
-            className={cn(
-              'rounded-md border px-3 py-3 text-sm',
-              submitState === 'success'
-                ? 'border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-300'
-                : 'border-destructive/30 bg-destructive/5 text-destructive'
-            )}
-          >
-            {submitState === 'success'
-              ? '日报已保存'
-              : submitError || '日报暂未保存'}
-          </div>
-        ) : null}
-
-        <div className='bg-muted/30 flex flex-col gap-3 rounded-md border px-3 py-3 sm:flex-row sm:items-center sm:justify-between'>
-          <div className='flex min-w-0 items-start gap-3'>
-            <div
-              className={cn(
-                'flex size-9 shrink-0 items-center justify-center rounded-md',
-                actionIconClass
-              )}
-            >
-              {needsAttention ? (
-                <AlertTriangle className='size-4' />
-              ) : (
-                <CheckCircle2 className='size-4' />
-              )}
-            </div>
-            <div className='min-w-0'>
-              <div className='text-sm font-medium'>{actionTitle}</div>
-              <div className={cn('mt-1 text-xs', actionDescriptionClass)}>
-                {savedWorkHourCount > 0
-                  ? '已补充 ' +
-                    savedWorkHourCount +
-                    ' 项工时，请重新生成日报草稿后再提交'
-                  : missingOverdueReasonCount > 0
-                    ? `请填写剩余 ${missingOverdueReasonCount} 项逾期原因`
-                    : activeBlockers[0]?.description ||
-                      (hasSubmitted
-                        ? 'OA 已保存本次日报'
-                        : isUpdate
-                          ? '请最后核对修改后的工作总结和日报明细'
-                          : '请最后核对工作总结和日报明细')}
-              </div>
-            </div>
-          </div>
-
-          <div className='flex flex-wrap items-center gap-2'>
-            {hasStructuredMissingWorkHours ? (
-              <WorkHourFillSheet
-                items={missingWorkHourItems}
-                workDate={draft.workDate}
-                confirmationContext={draft.confirmationContext}
-                savedKeys={savedWorkHourKeys}
-                onSaved={(key) =>
-                  setSavedWorkHourKeys((current) => {
-                    const next = new Set(current)
-                    next.add(key)
-                    return next
-                  })
-                }
-              />
-            ) : hasMissingWorkHours ? (
-              <Button asChild size='sm' variant='outline'>
-                <a href={OA_MY_WORK_ITEM_URL} target='_blank' rel='noreferrer'>
-                  <ExternalLink />
-                  去我的工作项填写工时
-                </a>
-              </Button>
-            ) : null}
-            {!hasSubmitted && hasMissingWorkHours ? (
-              <Button
-                size='sm'
-                variant='secondary'
-                onClick={handleRegenerateDraft}
-                disabled={!threadRuntime}
-              >
-                <RefreshCw data-icon='inline-start' />
-                重新生成草稿
-              </Button>
-            ) : null}
-            {showConfirmButton ? (
-              <Button
-                size='sm'
-                onClick={handleConfirm}
-                disabled={!canSubmit || submitState === 'submitting'}
-              >
-                {submitState === 'submitting' ? (
-                  <LoaderCircle className='animate-spin' />
-                ) : isUpdate ? (
-                  <Save />
+            <div className='min-w-0 flex-1'>
+              <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                <CardTitle className='truncate text-base'>
+                  {hasSubmitted
+                    ? isUpdate
+                      ? '日报修改已保存'
+                      : '日报提交成功'
+                    : hasValidationProblem
+                      ? activeBlockers[0]?.title || '日报还需要补充信息'
+                      : operationCopy.readyTitle}
+                </CardTitle>
+                {hasSubmitted ? (
+                  <Badge variant='secondary'>
+                    {isUpdate ? '已保存' : '已提交'}
+                  </Badge>
+                ) : hasValidationProblem ? (
+                  <Badge variant='secondary'>待补充</Badge>
                 ) : (
-                  <Send />
+                  <Badge variant='secondary'>
+                    {isUpdate ? operationCopy.pendingStatus : '可以提交'}
+                  </Badge>
                 )}
-                {operationCopy.confirmLabel}
-              </Button>
-            ) : null}
+              </div>
+              <CardDescription className='mt-1'>
+                {hasSubmitted
+                  ? `${draft.workDate ? `${draft.workDate} 的` : ''}日报已同步到 OA。`
+                  : hasValidationProblem
+                    ? activeBlockers[0]?.description ||
+                      draft.readiness.description ||
+                      message
+                    : draft.readiness.status === 'ACTION_REQUIRED'
+                      ? isUpdate
+                        ? '需要补充的信息已填写，可以确认保存。'
+                        : '需要补充的信息已填写，可以确认提交。'
+                      : isUpdate
+                        ? operationCopy.description
+                        : draft.readiness.description ||
+                          message ||
+                          operationCopy.description}
+              </CardDescription>
+            </div>
+            <CardAction>
+              <CollapsibleTrigger asChild>
+                <Button
+                  type='button'
+                  size='icon'
+                  variant='ghost'
+                  className='size-8'
+                  aria-label={isExpanded ? '收起日报' : '展开日报'}
+                  title={isExpanded ? '收起日报' : '展开日报'}
+                >
+                  <ChevronRight
+                    className={cn(
+                      'transition-transform duration-200',
+                      isExpanded && 'rotate-90'
+                    )}
+                  />
+                </Button>
+              </CollapsibleTrigger>
+            </CardAction>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardHeader>
+
+        <CollapsibleContent className='CollapsibleContent'>
+          <CardContent className='flex flex-col gap-4 px-4 py-4 sm:px-5'>
+            <div className='bg-muted/20 rounded-md border px-3 py-3 text-sm'>
+              <label className='flex flex-col gap-2'>
+                <span className='flex items-center gap-2 text-sm font-medium'>
+                  <ClipboardList className='text-primary size-4' />
+                  工作总结
+                </span>
+                <textarea
+                  value={remarkDraft}
+                  onChange={(event) => setRemarkDraft(event.target.value)}
+                  disabled={hasSubmitted}
+                  maxLength={1024}
+                  placeholder='请填写工作总结，最多1024字'
+                  className={cn(textareaClassName, 'min-h-24 resize-y')}
+                />
+                <span className='text-muted-foreground self-end text-xs'>
+                  {remarkDraft.length}/1024
+                </span>
+              </label>
+            </div>
+
+            <div className='rounded-md border'>
+              <div className='flex flex-wrap items-center justify-between gap-2 border-b px-3 py-3'>
+                <div className='min-w-0'>
+                  <div className='truncate text-sm font-medium'>
+                    {hasSubmitted
+                      ? `${draft.workDate ? `${draft.workDate} ` : ''}工作日报`
+                      : report.title ||
+                        `${draft.workDate || ''} 工作日报${isUpdate ? '' : '草稿'}`}
+                  </div>
+                  <div className='text-muted-foreground mt-1 text-xs'>
+                    {dailyReportItemCount(report.sections)} 项明细
+                  </div>
+                </div>
+                <Badge variant='outline'>
+                  {hasSubmitted
+                    ? isUpdate
+                      ? '已保存'
+                      : '已提交'
+                    : operationCopy.reportBadge}
+                </Badge>
+              </div>
+
+              {report.sections.length ? (
+                <div className='divide-y'>
+                  {report.sections.map((section) => (
+                    <DailyReportSectionView
+                      key={section.id}
+                      section={section}
+                      overdueMatches={overdueMatches}
+                      overdueReasons={overdueReasons}
+                      disabled={hasSubmitted}
+                      onReasonChange={(key, value) =>
+                        setOverdueReasons((current) => ({
+                          ...current,
+                          [key]: value,
+                        }))
+                      }
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className='bg-muted/30 px-3 py-3 text-sm leading-6 whitespace-pre-wrap'>
+                  {draft.content || '草稿内容为空'}
+                </div>
+              )}
+            </div>
+
+            {activeBlockers.length ? (
+              <div className='border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-3 text-sm'>
+                <div className='flex items-center gap-2 font-medium'>
+                  <AlertTriangle className='size-4' />
+                  {isUpdate ? '保存前还需要处理' : '提交前还需要处理'}
+                </div>
+                <div className='mt-2 space-y-2'>
+                  {activeBlockers.map((item) => (
+                    <div key={item.code}>
+                      <div className='font-medium'>{item.title}</div>
+                      {item.description ? (
+                        <div className='mt-0.5 text-xs opacity-85'>
+                          {item.description}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {draft.readiness.suggestions.length ? (
+              <div className='rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-sm'>
+                <div className='flex items-center gap-2 font-medium text-amber-800 dark:text-amber-200'>
+                  <HelpCircle className='size-4' />
+                  可以再完善
+                </div>
+                <div className='mt-2 space-y-2'>
+                  {draft.readiness.suggestions.map((item) => (
+                    <div key={item.code}>
+                      <div className='font-medium'>{item.title}</div>
+                      {item.description ? (
+                        <div className='text-muted-foreground mt-0.5 text-xs'>
+                          {item.description}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {unmatchedOverdueItems.length ? (
+              <div className='border-destructive/30 bg-destructive/5 rounded-md border px-3 py-3 text-sm'>
+                <div className='text-destructive flex items-center gap-2 font-medium'>
+                  <AlertTriangle className='size-4' />
+                  待补充逾期原因
+                </div>
+                <div className='mt-3 flex flex-col gap-3'>
+                  {unmatchedOverdueItems.map((item) => (
+                    <OverdueReasonInput
+                      key={item.key}
+                      item={item}
+                      value={overdueReasons[item.key] ?? ''}
+                      disabled={hasSubmitted}
+                      onChange={(value) =>
+                        setOverdueReasons((current) => ({
+                          ...current,
+                          [item.key]: value,
+                        }))
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <DailyReportReferencesView references={draft.references} />
+
+            <div className='flex items-center gap-3 pt-1'>
+              <span className='text-muted-foreground shrink-0 text-xs font-medium'>
+                提交概览
+              </span>
+              <Separator className='flex-1' />
+            </div>
+
+            <DailyReportSummaryCards
+              workDate={draft.workDate || '-'}
+              workHourStats={workHourStats}
+              statusText={statusText}
+              hasSubmitted={hasSubmitted}
+              hasValidationProblem={hasValidationProblem}
+            />
+
+            {submitError ? (
+              <div className='border-destructive/30 bg-destructive/5 text-destructive rounded-md border px-3 py-3 text-sm'>
+                {submitError}
+              </div>
+            ) : null}
+
+            <div className='bg-muted/30 flex flex-col gap-3 rounded-md border px-3 py-3 sm:flex-row sm:items-center sm:justify-between'>
+              <div className='flex min-w-0 items-start gap-3'>
+                <div
+                  className={cn(
+                    'flex size-9 shrink-0 items-center justify-center rounded-md',
+                    actionIconClass
+                  )}
+                >
+                  {needsAttention ? (
+                    <AlertTriangle className='size-4' />
+                  ) : (
+                    <CheckCircle2 className='size-4' />
+                  )}
+                </div>
+                <div className='min-w-0'>
+                  <div className='text-sm font-medium'>{actionTitle}</div>
+                  <div className={cn('mt-1 text-xs', actionDescriptionClass)}>
+                    {savedWorkHourCount > 0
+                      ? '已补充 ' +
+                        savedWorkHourCount +
+                        ' 项工时，请重新生成日报草稿后再提交'
+                      : missingOverdueReasonCount > 0
+                        ? `请填写剩余 ${missingOverdueReasonCount} 项逾期原因`
+                        : activeBlockers[0]?.description ||
+                          (hasSubmitted
+                            ? 'OA 已保存本次日报'
+                            : isUpdate
+                              ? '请最后核对修改后的工作总结和日报明细'
+                              : '请最后核对工作总结和日报明细')}
+                  </div>
+                </div>
+              </div>
+
+              <div className='flex flex-wrap items-center gap-2'>
+                {hasStructuredMissingWorkHours ? (
+                  <WorkHourFillSheet
+                    items={missingWorkHourItems}
+                    workDate={draft.workDate}
+                    confirmationContext={draft.confirmationContext}
+                    savedKeys={savedWorkHourKeys}
+                    onSaved={(key) =>
+                      setSavedWorkHourKeys((current) => {
+                        const next = new Set(current)
+                        next.add(key)
+                        return next
+                      })
+                    }
+                  />
+                ) : hasMissingWorkHours ? (
+                  <Button asChild size='sm' variant='outline'>
+                    <a
+                      href={OA_MY_WORK_ITEM_URL}
+                      target='_blank'
+                      rel='noreferrer'
+                    >
+                      <ExternalLink />
+                      去我的工作项填写工时
+                    </a>
+                  </Button>
+                ) : null}
+                {!hasSubmitted && hasMissingWorkHours ? (
+                  <Button
+                    size='sm'
+                    variant='secondary'
+                    onClick={handleRegenerateDraft}
+                    disabled={!threadRuntime}
+                  >
+                    <RefreshCw data-icon='inline-start' />
+                    重新生成草稿
+                  </Button>
+                ) : null}
+                {showConfirmButton ? (
+                  <Button
+                    size='sm'
+                    onClick={handleConfirm}
+                    disabled={!canSubmit || submitState === 'submitting'}
+                  >
+                    {submitState === 'submitting' ? (
+                      <LoaderCircle className='animate-spin' />
+                    ) : isUpdate ? (
+                      <Save />
+                    ) : (
+                      <Send />
+                    )}
+                    {operationCopy.confirmLabel}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
   )
 }
 
@@ -3323,6 +3371,58 @@ function OaGenericResultCard({
   )
 }
 
+function OaDailyReportSuccessCard({ auditId }: { auditId?: string }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+
+  return (
+    <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
+      <Card className='w-full max-w-2xl gap-0 overflow-hidden rounded-lg py-0 shadow-none'>
+        <CardHeader
+          className={cn('px-4 py-4 sm:px-5', isExpanded && 'border-b')}
+        >
+          <div className='flex items-start gap-3'>
+            <IconFrame icon={CheckCircle2} tone='success' />
+            <div className='min-w-0 flex-1'>
+              <CardTitle className='text-base'>日报提交成功</CardTitle>
+              <CardDescription className='mt-1'>已同步到 OA。</CardDescription>
+            </div>
+            {auditId ? (
+              <CardAction>
+                <CollapsibleTrigger asChild>
+                  <Button
+                    type='button'
+                    size='icon'
+                    variant='ghost'
+                    className='size-8'
+                    aria-label={isExpanded ? '收起提交详情' : '展开提交详情'}
+                    title={isExpanded ? '收起提交详情' : '展开提交详情'}
+                  >
+                    <ChevronRight
+                      className={cn(
+                        'transition-transform duration-200',
+                        isExpanded && 'rotate-90'
+                      )}
+                    />
+                  </Button>
+                </CollapsibleTrigger>
+              </CardAction>
+            ) : null}
+          </div>
+        </CardHeader>
+        {auditId ? (
+          <CollapsibleContent className='CollapsibleContent'>
+            <CardContent className='px-4 py-3 sm:px-5'>
+              <div className='text-muted-foreground text-xs break-all'>
+                提交记录：{auditId}
+              </div>
+            </CardContent>
+          </CollapsibleContent>
+        ) : null}
+      </Card>
+    </Collapsible>
+  )
+}
+
 function OaErrorCard({ result }: { result: OaToolResult }) {
   const isDailyReportError =
     result.toolName === 'generateDailyReportDraft' ||
@@ -3340,14 +3440,14 @@ function OaErrorCard({ result }: { result: OaToolResult }) {
     ? '日报校验未通过'
     : isDailyReportError
       ? '日报暂未保存'
-    : isWorkHourError
-      ? '工时未保存'
-      : '暂时无法完成操作'
+      : isWorkHourError
+        ? '工时未保存'
+        : '暂时无法完成操作'
   const message = isWorkHourError
     ? workHourErrorMessage(result)
     : isDailyReportError
       ? dailyReportErrorMessage(result)
-    : result.message || '请稍后重试，或检查当前 OA 登录状态。'
+      : result.message || '请稍后重试，或检查当前 OA 登录状态。'
 
   return (
     <Card className='w-full max-w-xl gap-4 rounded-lg py-4 shadow-none'>
@@ -4716,19 +4816,6 @@ function mergeOverdueReasons(
     }
   }
   return next
-}
-
-function submittedDailyReportResponse(
-  draftId?: string,
-  message = '日报已保存',
-  result?: Record<string, unknown>
-): DailyReportConfirmationResponse {
-  return {
-    status: 'ACCEPTED',
-    draftId,
-    message,
-    result,
-  }
 }
 
 function compactStringMap(values: Record<string, string>) {
