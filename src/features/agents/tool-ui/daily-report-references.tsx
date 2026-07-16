@@ -4,10 +4,15 @@ import type { DailyReportReferences } from './daily-report-model'
 
 export function DailyReportReferencesView({
   references,
+  showUserContent = true,
+  title = '本次草稿引用',
 }: {
   references: DailyReportReferences
+  showUserContent?: boolean
+  title?: string
 }) {
-  if (!references.userContent.length && !references.oaSources.length) {
+  const hasUserContent = showUserContent && references.userContent.length > 0
+  if (!hasUserContent && !references.oaSources.length) {
     return null
   }
 
@@ -15,9 +20,9 @@ export function DailyReportReferencesView({
     <div className='bg-muted/20 rounded-md border px-3 py-3 text-sm'>
       <div className='flex items-center gap-2 font-medium'>
         <CornerDownRight className='text-primary size-4' />
-        本次草稿引用
+        {title}
       </div>
-      {references.userContent.length ? (
+      {hasUserContent ? (
         <div className='mt-3'>
           <div className='text-muted-foreground text-xs'>你的补充</div>
           <div className='border-primary/30 mt-1.5 border-l-2 pl-3 leading-6 whitespace-pre-wrap'>

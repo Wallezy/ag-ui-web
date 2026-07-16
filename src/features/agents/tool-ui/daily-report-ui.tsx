@@ -56,22 +56,31 @@ import {
   matchOverdueReasonItems,
   mergeOverdueReasons,
   parseDailyReportContent,
+  parseDailyReportDraftResult,
   readStringRecord,
   type DailyReportDraftResult,
 } from './daily-report-model'
 import { DailyReportReferencesView } from './daily-report-references'
+import {
+  hasUnsavedDailyReportChanges,
+  isDailyReportPersisted,
+  resolveDailyReportStatus,
+} from './daily-report-status'
 import { IconFrame, textareaClassName } from './primitives'
-import { readText } from './shared'
+import { readString, readText } from './shared'
 import { WorkHourFillActionCard, WorkHourFillSheet } from './work-hour-ui'
 
 export function OaDailyReportDraftCard({
   draft,
   message,
+  displayMode = 'draft',
 }: {
   draft: DailyReportDraftResult
   message?: string
+  displayMode?: 'draft' | 'detail'
 }) {
   const threadRuntime = useThreadRuntime({ optional: true })
+  const isDetailView = displayMode === 'detail'
   const isUpdate = draft.operationMode === 'update'
   const operationCopy = dailyReportOperationCopy(draft.operationMode)
   const initiallySubmitted = draft.submitted || draft.status === 'SUBMITTED'
@@ -80,12 +89,18 @@ export function OaDailyReportDraftCard({
   const [submitState, setSubmitState] = useState<
     'idle' | 'submitting' | 'success' | 'error'
   >(() => (initiallySubmitted ? 'success' : 'idle'))
-  const [isExpanded, setIsExpanded] = useState(() => !initiallySubmitted)
+  const [isExpanded, setIsExpanded] = useState(
+    () => isDetailView || !initiallySubmitted
+  )
   const [submitError, setSubmitError] = useState('')
   const [overdueReasons, setOverdueReasons] = useState<Record<string, string>>(
     () => initialOverdueReasons(draft.overdueReasonItems, draft.overdueReasons)
   )
   const [remarkDraft, setRemarkDraft] = useState(() => draft.remark || '')
+  const [savedOverdueReasons] = useState<Record<string, string>>(() =>
+    initialOverdueReasons(draft.overdueReasonItems, draft.overdueReasons)
+  )
+  const [savedRemark] = useState(() => draft.remark || '')
   const [savedWorkHourKeys, setSavedWorkHourKeys] = useState<Set<string>>(
     () => new Set()
   )
@@ -108,7 +123,7 @@ export function OaDailyReportDraftCard({
         if (status.submitted || status.status === 'SUBMITTED') {
           setSubmitState('success')
           setSubmitError('')
-          setIsExpanded(false)
+          setIsExpanded(isDetailView)
         }
       })
       .catch(() => undefined)
@@ -116,13 +131,25 @@ export function OaDailyReportDraftCard({
     return () => {
       cancelled = true
     }
-  }, [draft.draftId, draft.overdueReasonItems])
+  }, [draft.draftId, draft.overdueReasonItems, isDetailView])
   const hasSubmitted =
     submitState === 'success' ||
     draft.submitted ||
     draft.status === 'SUBMITTED' ||
     Boolean(serverDraft?.submitted) ||
     serverDraft?.status === 'SUBMITTED'
+  const hasUnsavedChanges = hasUnsavedDailyReportChanges({
+    currentRemark: remarkDraft,
+    savedRemark,
+    currentOverdueReasons: overdueReasons,
+    savedOverdueReasons,
+  })
+  const reportPersisted = isDailyReportPersisted({
+    detailView: isDetailView,
+    existingReport: draft.existingReport,
+    submitted: hasSubmitted,
+    hasUnsavedChanges,
+  })
   const missingOverdueReasonCount = hasSubmitted
     ? 0
     : draft.overdueReasonItems.filter(
@@ -133,7 +160,10 @@ export function OaDailyReportDraftCard({
     draft.requiresConfirmation &&
     Boolean(draft.draftId) &&
     submitState !== 'success'
-  const canSubmit = showConfirmButton && missingOverdueReasonCount === 0
+  const canSubmit =
+    showConfirmButton &&
+    missingOverdueReasonCount === 0 &&
+    (!isDetailView || hasUnsavedChanges)
   const hasPendingOverdueReasons = missingOverdueReasonCount > 0
   const activeBlockers = draft.readiness.blockers.filter(
     (item) =>
@@ -244,32 +274,37 @@ export function OaDailyReportDraftCard({
   const unmatchedOverdueItems = draft.overdueReasonItems.filter(
     (item) => !overdueMatches.matchedKeys.has(item.key)
   )
-  const statusText = hasSubmitted
-    ? isUpdate
-      ? '已保存'
-      : '已提交'
+  const statusText = reportPersisted
+    ? '已提交'
     : hasValidationProblem
       ? '待补充'
       : operationCopy.pendingStatus
-  const actionIconClass = hasValidationProblem
-    ? 'bg-destructive/10 text-destructive'
-    : hasPendingOverdueReasons
-      ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
-      : 'bg-primary/10 text-primary'
-  const actionTitle = hasSubmitted
-    ? isUpdate
-      ? '日报修改已保存'
-      : '日报提交成功'
-    : missingOverdueReasonCount > 0
-      ? `还需填写 ${missingOverdueReasonCount} 项逾期原因`
-      : hasValidationProblem
-        ? activeBlockers[0]?.title || '还有信息待补充'
-        : operationCopy.readyAction
-  const actionDescriptionClass = hasValidationProblem
-    ? 'text-destructive'
-    : hasPendingOverdueReasons
-      ? 'text-amber-700 dark:text-amber-300'
-      : 'text-muted-foreground'
+  const actionIconClass = reportPersisted
+    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+    : hasValidationProblem
+      ? 'bg-destructive/10 text-destructive'
+      : hasPendingOverdueReasons
+        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+        : 'bg-primary/10 text-primary'
+  const actionTitle =
+    isDetailView && reportPersisted
+      ? '日报已提交'
+      : hasSubmitted
+        ? isUpdate
+          ? '日报修改已保存'
+          : '日报提交成功'
+        : missingOverdueReasonCount > 0
+          ? `还需填写 ${missingOverdueReasonCount} 项逾期原因`
+          : hasValidationProblem
+            ? activeBlockers[0]?.title || '还有信息待补充'
+            : operationCopy.readyAction
+  const actionDescriptionClass = reportPersisted
+    ? 'text-muted-foreground'
+    : hasValidationProblem
+      ? 'text-destructive'
+      : hasPendingOverdueReasons
+        ? 'text-amber-700 dark:text-amber-300'
+        : 'text-muted-foreground'
 
   return (
     <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
@@ -280,14 +315,14 @@ export function OaDailyReportDraftCard({
           <div className='flex items-start gap-3'>
             <IconFrame
               icon={
-                hasSubmitted
+                reportPersisted
                   ? CheckCircle2
                   : needsAttention
                     ? AlertTriangle
                     : FileText
               }
               tone={
-                hasSubmitted
+                reportPersisted
                   ? 'success'
                   : needsAttention
                     ? 'warning'
@@ -297,17 +332,25 @@ export function OaDailyReportDraftCard({
             <div className='min-w-0 flex-1'>
               <div className='flex min-w-0 flex-wrap items-center gap-2'>
                 <CardTitle className='truncate text-base'>
-                  {hasSubmitted
-                    ? isUpdate
-                      ? '日报修改已保存'
-                      : '日报提交成功'
-                    : hasValidationProblem
+                  {isDetailView
+                    ? draft.workDate
+                      ? `${draft.workDate} 工作日报`
+                      : '日报详情'
+                    : hasSubmitted
                       ? isUpdate
-                        ? '日报修改待补充'
-                        : '日报草稿待补充'
-                      : operationCopy.readyTitle}
+                        ? '日报修改已保存'
+                        : '日报提交成功'
+                      : hasValidationProblem
+                        ? isUpdate
+                          ? '日报修改待补充'
+                          : '日报草稿待补充'
+                        : operationCopy.readyTitle}
                 </CardTitle>
-                {hasSubmitted ? (
+                {isDetailView ? (
+                  <Badge variant='secondary'>
+                    {reportPersisted ? '已提交' : '待保存'}
+                  </Badge>
+                ) : hasSubmitted ? (
                   <Badge variant='secondary'>
                     {isUpdate ? '已保存' : '已提交'}
                   </Badge>
@@ -320,21 +363,25 @@ export function OaDailyReportDraftCard({
                 )}
               </div>
               <CardDescription className='mt-1'>
-                {hasSubmitted
-                  ? `${draft.workDate ? `${draft.workDate} 的` : ''}日报已同步到 OA。`
-                  : hasValidationProblem
-                    ? isUpdate
-                      ? '请完成必填项，补齐后即可保存。'
-                      : '请完成必填项，补齐后即可提交。'
-                    : draft.readiness.status === 'ACTION_REQUIRED'
+                {isDetailView
+                  ? reportPersisted
+                    ? '日报已提交到 OA，修改工作总结后可以再次保存。'
+                    : '内容已有修改，保存后将同步到 OA。'
+                  : hasSubmitted
+                    ? `${draft.workDate ? `${draft.workDate} 的` : ''}日报已同步到 OA。`
+                    : hasValidationProblem
                       ? isUpdate
-                        ? '需要补充的信息已填写，可以确认保存。'
-                        : '需要补充的信息已填写，可以确认提交。'
-                      : isUpdate
-                        ? operationCopy.description
-                        : draft.readiness.description ||
-                          message ||
-                          operationCopy.description}
+                        ? '请完成必填项，补齐后即可保存。'
+                        : '请完成必填项，补齐后即可提交。'
+                      : draft.readiness.status === 'ACTION_REQUIRED'
+                        ? isUpdate
+                          ? '需要补充的信息已填写，可以确认保存。'
+                          : '需要补充的信息已填写，可以确认提交。'
+                        : isUpdate
+                          ? operationCopy.description
+                          : draft.readiness.description ||
+                            message ||
+                            operationCopy.description}
               </CardDescription>
             </div>
             <CardAction>
@@ -375,11 +422,15 @@ export function OaDailyReportDraftCard({
                   </div>
                 </div>
                 <Badge variant='outline'>
-                  {hasSubmitted
-                    ? isUpdate
-                      ? '已保存'
-                      : '已提交'
-                    : operationCopy.reportBadge}
+                  {isDetailView
+                    ? reportPersisted
+                      ? '已提交'
+                      : '待保存'
+                    : hasSubmitted
+                      ? isUpdate
+                        ? '已保存'
+                        : '已提交'
+                      : operationCopy.reportBadge}
                 </Badge>
               </div>
 
@@ -433,7 +484,11 @@ export function OaDailyReportDraftCard({
               </div>
             ) : null}
 
-            <DailyReportReferencesView references={draft.references} />
+            <DailyReportReferencesView
+              references={draft.references}
+              showUserContent={!isDetailView}
+              title={isDetailView ? '日报数据构成' : '本次草稿引用'}
+            />
 
             <div className='flex items-center gap-3 pt-1'>
               <span className='text-muted-foreground shrink-0 text-xs font-medium'>
@@ -446,7 +501,7 @@ export function OaDailyReportDraftCard({
               workDate={draft.workDate || '-'}
               workHourStats={workHourStats}
               statusText={statusText}
-              hasSubmitted={hasSubmitted}
+              hasSubmitted={reportPersisted}
               hasValidationProblem={hasValidationProblem}
             />
 
@@ -484,7 +539,7 @@ export function OaDailyReportDraftCard({
                     actionIconClass
                   )}
                 >
-                  {needsAttention ? (
+                  {!reportPersisted && needsAttention ? (
                     <AlertTriangle className='size-4' />
                   ) : (
                     <CheckCircle2 className='size-4' />
@@ -493,18 +548,22 @@ export function OaDailyReportDraftCard({
                 <div className='min-w-0'>
                   <div className='text-sm font-medium'>{actionTitle}</div>
                   <div className={cn('mt-1 text-xs', actionDescriptionClass)}>
-                    {savedWorkHourCount > 0
-                      ? '已补充 ' +
-                        savedWorkHourCount +
-                        ' 项工时，请重新生成日报草稿后再提交'
-                      : missingOverdueReasonCount > 0
-                        ? '请在上方红框中补充原因，完成后即可提交'
-                        : activeBlockers[0]?.description ||
-                          (hasSubmitted
-                            ? 'OA 已保存本次日报'
-                            : isUpdate
-                              ? '请最后核对修改后的工作总结和日报明细'
-                              : '请最后核对工作总结和日报明细')}
+                    {isDetailView && reportPersisted
+                      ? hasSubmitted
+                        ? '本次修改已保存到 OA'
+                        : '当前内容与 OA 一致，修改后可再次保存'
+                      : savedWorkHourCount > 0
+                        ? '已补充 ' +
+                          savedWorkHourCount +
+                          ' 项工时，请重新生成日报草稿后再提交'
+                        : missingOverdueReasonCount > 0
+                          ? '请在上方红框中补充原因，完成后即可提交'
+                          : activeBlockers[0]?.description ||
+                            (hasSubmitted
+                              ? 'OA 已保存本次日报'
+                              : isUpdate
+                                ? '请最后核对修改后的工作总结和日报明细'
+                                : '请最后核对工作总结和日报明细')}
                   </div>
                 </div>
               </div>
@@ -560,7 +619,7 @@ export function OaDailyReportDraftCard({
                     ) : (
                       <Send />
                     )}
-                    {operationCopy.confirmLabel}
+                    {isDetailView ? '保存修改' : operationCopy.confirmLabel}
                   </Button>
                 ) : null}
               </div>
@@ -569,5 +628,86 @@ export function OaDailyReportDraftCard({
         </CollapsibleContent>
       </Card>
     </Collapsible>
+  )
+}
+
+export function OaDailyReportStatusCard({
+  result,
+  message,
+}: {
+  result?: Record<string, unknown>
+  message?: string
+}) {
+  const status = resolveDailyReportStatus(result, parseDailyReportDraftResult)
+  const payload = status?.payload
+  const workDate = status?.draft?.workDate || readString(payload?.workDate)
+  const content = status?.draft?.content || readString(payload?.content) || ''
+  const remark = status?.draft?.remark || readString(payload?.remark)
+
+  if (status?.draft) {
+    return (
+      <OaDailyReportDraftCard
+        draft={status.draft}
+        message={message}
+        displayMode='detail'
+      />
+    )
+  }
+
+  if (!status?.found) {
+    return (
+      <Card className='w-full max-w-3xl gap-0 rounded-lg py-0 shadow-none'>
+        <CardHeader className='px-4 py-4 sm:px-5'>
+          <div className='flex items-start gap-3'>
+            <IconFrame icon={FileText} />
+            <div className='min-w-0 flex-1'>
+              <CardTitle className='text-base'>当日没有日报</CardTitle>
+              <CardDescription className='mt-1'>
+                {workDate
+                  ? `${workDate} 暂未查询到 OA 日报。`
+                  : message || '当前日期暂未查询到 OA 日报。'}
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
+    )
+  }
+
+  return (
+    <Card className='w-full max-w-3xl gap-0 overflow-hidden rounded-lg py-0 shadow-none'>
+      <CardHeader className='border-b px-4 py-4 sm:px-5'>
+        <div className='flex items-start gap-3'>
+          <IconFrame icon={FileText} />
+          <div className='min-w-0 flex-1'>
+            <div className='flex flex-wrap items-center gap-2'>
+              <CardTitle className='text-base'>
+                {workDate ? `${workDate} 工作日报` : '日报详情'}
+              </CardTitle>
+              <Badge variant='secondary'>完整内容</Badge>
+            </div>
+            <CardDescription className='mt-1'>
+              {message || '已加载 OA 日报正文。'}
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className='flex flex-col gap-4 px-4 py-4 sm:px-5'>
+        <section>
+          <h3 className='mb-2 text-sm font-medium'>日报正文</h3>
+          <div className='bg-muted/30 rounded-md border px-3 py-3 text-sm leading-6 break-words whitespace-pre-wrap'>
+            {content || remark || '日报正文为空'}
+          </div>
+        </section>
+        {remark && !content.includes(remark) ? (
+          <section>
+            <h3 className='mb-2 text-sm font-medium'>工作总结</h3>
+            <div className='bg-muted/20 rounded-md border px-3 py-3 text-sm leading-6 break-words whitespace-pre-wrap'>
+              {remark}
+            </div>
+          </section>
+        ) : null}
+      </CardContent>
+    </Card>
   )
 }

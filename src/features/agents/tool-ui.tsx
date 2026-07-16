@@ -44,7 +44,10 @@ import {
   isDailyReportMissingWorkHours,
   parseDailyReportDraftResult,
 } from './tool-ui/daily-report-model'
-import { OaDailyReportDraftCard } from './tool-ui/daily-report-ui'
+import {
+  OaDailyReportDraftCard,
+  OaDailyReportStatusCard,
+} from './tool-ui/daily-report-ui'
 import { IconFrame, OaMetric } from './tool-ui/primitives'
 import {
   formatDisplayValue,
@@ -239,17 +242,10 @@ function OaToolResultCard({ result }: { result: OaToolResult }) {
   }
 
   if (result.toolName === 'queryDailyReportStatus') {
-    const draft = parseDailyReportDraftResult(result.result)
-    if (draft) {
-      return <OaDailyReportDraftCard draft={draft} message={result.message} />
-    }
     return (
-      <OaGenericResultCard
-        icon={FileText}
-        title='日报详情'
-        badge='Status'
-        message={result.message || '当前日期没有日报'}
+      <OaDailyReportStatusCard
         result={result.result}
+        message={result.message}
       />
     )
   }
