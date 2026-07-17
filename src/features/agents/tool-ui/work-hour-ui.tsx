@@ -271,10 +271,10 @@ export function WorkHourFillActionCard({
                   </div>
                   <div className='text-muted-foreground mt-1 text-xs'>
                     {hasSavedPositiveWorkHour
-                      ? '已存在有效工时，现在可以继续生成日报草稿。'
+                      ? '已保存有效工时，可以继续写日报。'
                       : savedCount > 0
-                        ? '日报至少需要一项大于 0 小时的工时，请继续填写。'
-                        : '至少保存一项大于 0 小时的工时后，才能继续生成日报。'}
+                        ? '当前页面保存的工时为 0；写日报时会重新检查 OA 最新工时。'
+                        : '可以直接写日报；系统会先检查 OA 中是否已有有效工时。'}
                   </div>
                 </div>
               </div>
@@ -356,37 +356,32 @@ function DailyReportContinuation({
   return (
     <div className='flex flex-col gap-3 border-t px-4 py-4 sm:px-5'>
       <div className='min-w-0'>
-        <div className='text-sm font-medium'>
-          {hasSavedPositiveWorkHour ? '下一步' : '已经在 OA 登记了工时？'}
-        </div>
+        <div className='text-sm font-medium'>写日报</div>
         <div className='text-muted-foreground mt-1 text-xs'>
           {hasSavedPositiveWorkHour
-            ? '重新读取 OA 数据并生成日报草稿。'
-            : '无需重复填写，重新检查后会直接继续生成日报。'}
+            ? '已保存有效工时，点击后将读取 OA 数据并生成日报草稿。'
+            : '点击后会先检查 OA 工时；没有有效工时时再提示你补充。'}
         </div>
       </div>
       <div className='flex flex-wrap items-center gap-2'>
         <Button
           size='sm'
-          variant={hasSavedPositiveWorkHour ? 'default' : 'outline'}
           onClick={onPrepare}
           disabled={!canPrepare || checking}
         >
           {checking ? (
             <LoaderCircle className='animate-spin' />
-          ) : hasSavedPositiveWorkHour ? (
-            <FileText data-icon='inline-start' />
           ) : (
-            <RefreshCw data-icon='inline-start' />
+            <FileText data-icon='inline-start' />
           )}
-          {checking
-            ? '正在检查'
-            : hasSavedPositiveWorkHour
-              ? '生成日报草稿'
-              : '重新检查并继续'}
+          {checking ? '正在生成日报' : '写日报'}
         </Button>
       </div>
-      {message ? (
+      {checking ? (
+        <div className='bg-muted/30 text-muted-foreground rounded-md border px-3 py-2 text-xs'>
+          正在检查今日工时并整理日报草稿，请稍候。
+        </div>
+      ) : message ? (
         <div
           className={cn(
             'rounded-md border px-3 py-2 text-xs',
