@@ -565,9 +565,15 @@ export function DailyReportSummaryCards({
     hasValidationProblem,
   })
   const StatusIcon = statusStyle.icon
+  const showStatusCard = hasSubmitted || !hasValidationProblem
 
   return (
-    <div className='grid gap-3 sm:grid-cols-3'>
+    <div
+      className={cn(
+        'grid gap-3',
+        showStatusCard ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+      )}
+    >
       <div className='bg-muted/50 flex min-w-0 flex-col justify-center rounded-lg border p-2.5'>
         <div className='mb-1.5 flex items-center gap-1.5'>
           <CalendarClock className='text-muted-foreground size-3' />
@@ -584,7 +590,7 @@ export function DailyReportSummaryCards({
         <div className='mb-1.5 flex items-center gap-1.5'>
           <Clock3 className='text-primary size-3' />
           <span className='text-primary text-[11px] font-medium'>
-            今日已填工时
+            总登记工时
           </span>
         </div>
         <div className='mb-1.5 flex items-baseline gap-1'>
@@ -605,31 +611,33 @@ export function DailyReportSummaryCards({
         </div>
       </div>
 
-      <div
-        className={cn(
-          'flex min-w-0 flex-col justify-center rounded-lg border p-2.5',
-          statusStyle.cardClass
-        )}
-      >
-        <div className='mb-1.5 flex items-center gap-1.5'>
-          <StatusIcon className={cn('size-3', statusStyle.iconClass)} />
-          <span
-            className={cn('text-[11px] font-medium', statusStyle.labelClass)}
-          >
-            提交状态
-          </span>
+      {showStatusCard ? (
+        <div
+          className={cn(
+            'flex min-w-0 flex-col justify-center rounded-lg border p-2.5',
+            statusStyle.cardClass
+          )}
+        >
+          <div className='mb-1.5 flex items-center gap-1.5'>
+            <StatusIcon className={cn('size-3', statusStyle.iconClass)} />
+            <span
+              className={cn('text-[11px] font-medium', statusStyle.labelClass)}
+            >
+              提交状态
+            </span>
+          </div>
+          <div className='flex min-w-0 items-baseline'>
+            <span
+              className={cn(
+                'rounded-md border px-2 py-0.5 text-xs font-semibold sm:text-sm',
+                statusStyle.badgeClass
+              )}
+            >
+              {statusText}
+            </span>
+          </div>
         </div>
-        <div className='flex min-w-0 items-baseline'>
-          <span
-            className={cn(
-              'rounded-md border px-2 py-0.5 text-xs font-semibold sm:text-sm',
-              statusStyle.badgeClass
-            )}
-          >
-            {statusText}
-          </span>
-        </div>
-      </div>
+      ) : null}
     </div>
   )
 }

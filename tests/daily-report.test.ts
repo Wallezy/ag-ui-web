@@ -31,7 +31,7 @@ test('maps daily report failures to actionable copy', () => {
   )
   assert.equal(
     dailyReportErrorMessage({ errorCode: 'DAILY_REPORT_ALREADY_EXISTS' }),
-    '今天的日报已经存在，请重新加载后进行修改。'
+    '日报已提交：无需重新再提交，是否需要修改。'
   )
   assert.equal(
     dailyReportErrorMessage({ errorCode: 'DAILY_REPORT_SUBMISSION_UNKNOWN' }),

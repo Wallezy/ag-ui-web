@@ -6,6 +6,7 @@ import {
   ClipboardList,
   FileText,
   LoaderCircle,
+  Pencil,
   Save,
   Send,
 } from 'lucide-react'
@@ -151,6 +152,11 @@ export function OaDailyReportDraftCard({
     : draft.overdueReasonItems.filter(
         (item) => !overdueReasons[item.key]?.trim()
       ).length
+  const pendingOverdueReasonItems = hasSubmitted
+    ? []
+    : draft.overdueReasonItems.filter(
+        (item) => !overdueReasons[item.key]?.trim()
+      )
   const showConfirmButton =
     draft.submitReady &&
     draft.requiresConfirmation &&
@@ -271,9 +277,6 @@ export function OaDailyReportDraftCard({
     report.sections,
     draft.overdueReasonItems
   )
-  const unmatchedOverdueItems = draft.overdueReasonItems.filter(
-    (item) => !overdueMatches.matchedKeys.has(item.key)
-  )
   const statusText = reportPersisted
     ? '已提交'
     : hasValidationProblem
@@ -292,7 +295,7 @@ export function OaDailyReportDraftCard({
       : hasSubmitted
         ? isUpdate
           ? '日报修改已保存'
-          : '日报提交成功'
+          : '日报已提交'
         : missingOverdueReasonCount > 0
           ? `还需填写 ${missingOverdueReasonCount} 项逾期原因`
           : hasValidationProblem
@@ -339,7 +342,7 @@ export function OaDailyReportDraftCard({
                     : hasSubmitted
                       ? isUpdate
                         ? '日报修改已保存'
-                        : '日报提交成功'
+                        : '日报已提交'
                       : hasValidationProblem
                         ? isUpdate
                           ? '日报修改待补充'
@@ -368,7 +371,9 @@ export function OaDailyReportDraftCard({
                     ? '日报已提交到 OA，修改工作总结后可以再次保存。'
                     : '内容已有修改，保存后将同步到 OA。'
                   : hasSubmitted
-                    ? `${draft.workDate ? `${draft.workDate} 的` : ''}日报已同步到 OA。`
+                    ? isUpdate
+                      ? `${draft.workDate ? `${draft.workDate} 的` : ''}日报修改已同步到 OA。`
+                      : '无需重新再提交，是否需要修改。'
                     : hasValidationProblem
                       ? isUpdate
                         ? '请完成必填项，补齐后即可保存。'
@@ -384,7 +389,18 @@ export function OaDailyReportDraftCard({
                             operationCopy.description}
               </CardDescription>
             </div>
-            <CardAction>
+            <CardAction className='flex items-center gap-1'>
+              {hasSubmitted && !isExpanded ? (
+                <Button
+                  type='button'
+                  size='sm'
+                  variant='outline'
+                  onClick={() => setIsExpanded(true)}
+                >
+                  <Pencil />
+                  修改
+                </Button>
+              ) : null}
               <CollapsibleTrigger asChild>
                 <Button
                   type='button'
@@ -459,31 +475,6 @@ export function OaDailyReportDraftCard({
               )}
             </div>
 
-            {unmatchedOverdueItems.length ? (
-              <div className='border-destructive/30 bg-destructive/5 rounded-md border px-3 py-3 text-sm'>
-                <div className='text-destructive flex items-center gap-2 font-medium'>
-                  <AlertTriangle className='size-4' />
-                  待补充逾期原因
-                </div>
-                <div className='mt-3 flex flex-col gap-3'>
-                  {unmatchedOverdueItems.map((item) => (
-                    <OverdueReasonInput
-                      key={item.key}
-                      item={item}
-                      value={overdueReasons[item.key] ?? ''}
-                      disabled={hasSubmitted}
-                      onChange={(value) =>
-                        setOverdueReasons((current) => ({
-                          ...current,
-                          [item.key]: value,
-                        }))
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
             <DailyReportReferencesView
               references={draft.references}
               showUserContent={!isDetailView}
@@ -531,6 +522,34 @@ export function OaDailyReportDraftCard({
               </label>
             </div>
 
+            {pendingOverdueReasonItems.length ? (
+              <div className='border-destructive/30 bg-destructive/5 rounded-md border px-3 py-3 text-sm'>
+                <div className='text-destructive flex items-center gap-2 font-medium'>
+                  <AlertTriangle className='size-4' />
+                  还需填写 {pendingOverdueReasonItems.length} 项逾期原因
+                </div>
+                <div className='text-destructive mt-1 text-xs'>
+                  补充完成后即可确认提交
+                </div>
+                <div className='mt-3 flex flex-col gap-3'>
+                  {pendingOverdueReasonItems.map((item) => (
+                    <OverdueReasonInput
+                      key={item.key}
+                      item={item}
+                      value={overdueReasons[item.key] ?? ''}
+                      disabled={hasSubmitted}
+                      onChange={(value) =>
+                        setOverdueReasons((current) => ({
+                          ...current,
+                          [item.key]: value,
+                        }))
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className='bg-muted/30 flex flex-col gap-3 rounded-md border px-3 py-3 sm:flex-row sm:items-center sm:justify-between'>
               <div className='flex min-w-0 items-start gap-3'>
                 <div
@@ -553,7 +572,7 @@ export function OaDailyReportDraftCard({
                         ? '本次修改已保存到 OA'
                         : '当前内容与 OA 一致，修改后可再次保存'
                       : missingOverdueReasonCount > 0
-                        ? '请在上方红框中补充原因，完成后即可提交'
+                        ? '请补充逾期原因，完成后即可提交'
                         : activeBlockers[0]?.description ||
                           (hasSubmitted
                             ? 'OA 已保存本次日报'

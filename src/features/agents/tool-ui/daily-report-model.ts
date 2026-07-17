@@ -76,6 +76,7 @@ export type DailyReportDraftResult = {
   hasStructuredContent: boolean
   taskWork: Record<string, unknown>[]
   bugWork: Record<string, unknown>[]
+  totalRegisteredWorkHours?: number
   tomorrowWorkPlan: Record<string, unknown>[]
   unresolvedProblem: Record<string, unknown>[]
   unresolvedRisk: Record<string, unknown>[]
@@ -138,7 +139,7 @@ export function dailyReportWorkHourStats(draft: DailyReportDraftResult) {
   return {
     task,
     bug,
-    total: task + bug,
+    total: draft.totalRegisteredWorkHours ?? task + bug,
   }
 }
 
@@ -706,6 +707,7 @@ export function parseDailyReportDraftResult(
     result.references,
     result.sourceData
   )
+  const totalRegisteredWorkHours = readTotalRegisteredWorkHours(result)
   const oaReportId = readString(result.oaReportId)
   const operationMode = dailyReportOperationMode(
     result.operationMode,
@@ -744,6 +746,7 @@ export function parseDailyReportDraftResult(
     hasStructuredContent,
     taskWork: taskWork ?? [],
     bugWork: bugWork ?? [],
+    totalRegisteredWorkHours,
     tomorrowWorkPlan: tomorrowWorkPlan ?? [],
     unresolvedProblem: unresolvedProblem ?? [],
     unresolvedRisk: unresolvedRisk ?? [],
@@ -766,6 +769,41 @@ export function parseDailyReportDraftResult(
       ? result.confirmationContext
       : undefined,
   }
+}
+
+function readTotalRegisteredWorkHours(result: Record<string, unknown>) {
+  const directValue = firstRecordValue(
+    result,
+    'totalRegisteredWorkHours',
+    'registeredWorkHours',
+    'totalWorkHours'
+  )
+  const direct = directValue === undefined ? undefined : numberValue(directValue)
+  if (direct !== undefined) return direct
+
+  if (isRecord(result.workHourStats)) {
+    const statsValue = firstRecordValue(
+      result.workHourStats,
+      'totalRegistered',
+      'total',
+      'registered'
+    )
+    const stats =
+      statsValue === undefined ? undefined : numberValue(statsValue)
+    if (stats !== undefined) return stats
+  }
+
+  if (isRecord(result.sourceData) && isRecord(result.sourceData.workHours)) {
+    const sourceValue = firstRecordValue(
+      result.sourceData.workHours,
+      'totalRegistered',
+      'total',
+      'registered'
+    )
+    return sourceValue === undefined ? undefined : numberValue(sourceValue)
+  }
+
+  return undefined
 }
 
 function readDailyReportReadiness(

@@ -64,7 +64,7 @@ export function dailyReportErrorMessage(
     return '保存结果暂时无法确认，请先查询今天的日报状态。'
   }
   if (code.includes('DUPLICATE') || code.includes('ALREADY_EXISTS')) {
-    return '今天的日报已经存在，请重新加载后进行修改。'
+    return '日报已提交：无需重新再提交，是否需要修改。'
   }
   if (code.includes('FORBIDDEN') || code.includes('PERMISSION')) {
     return '你当前不能保存这份日报，请确认账号权限后重试。'
