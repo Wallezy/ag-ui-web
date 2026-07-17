@@ -7,7 +7,6 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { useThreadRuntime } from '@assistant-ui/react'
 import {
   CheckCircle2,
   ChevronRight,
@@ -52,19 +51,26 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   getWorkHourOptions,
+  prepareDailyReport,
   saveWorkHourExecutionWithIntentRefresh,
   type MissingWorkHourItem,
   type WorkHourOptionsResponse,
 } from '../api'
+import { dailyReportErrorMessage } from '../daily-report'
 import {
   highWorkHourConfirmation,
   highWorkHourConfirmationDetails,
+  hasPositiveWorkHour,
   isAllowedWorkHourDate,
   isHighWorkHourConfirmationRequired,
   workHourErrorMessage,
 } from '../work-hour'
 import { OA_MY_WORK_ITEM_URL, OA_PROJECT_LIST_URL } from './constants'
-import type { DailyReportReferences } from './daily-report-model'
+import {
+  parseDailyReportDraftResult,
+  type DailyReportDraftResult,
+  type DailyReportReferences,
+} from './daily-report-model'
 import { DailyReportReferencesView } from './daily-report-references'
 import { IconFrame, OaMetric } from './primitives'
 import { formatNumber, readText } from './shared'
@@ -84,7 +90,7 @@ export function WorkHourFillActionCard({
   message,
   title = '填工时',
   emptyDescription = '当前没有拿到可直接填工时的任务或缺陷，可以去我的工作项处理。',
-  onRegenerate,
+  onDailyReportPrepared,
   references,
 }: {
   items: MissingWorkHourItem[]
@@ -93,11 +99,19 @@ export function WorkHourFillActionCard({
   message?: string
   title?: string
   emptyDescription?: string
-  onRegenerate?: () => void
+  onDailyReportPrepared: (
+    draft: DailyReportDraftResult,
+    message?: string
+  ) => void
   references?: DailyReportReferences
 }) {
-  const threadRuntime = useThreadRuntime({ optional: true })
-  const [savedKeys, setSavedKeys] = useState<Set<string>>(() => new Set())
+  const [savedWorkHours, setSavedWorkHours] = useState<Map<string, number>>(
+    () => new Map()
+  )
+  const [prepareState, setPrepareState] = useState<
+    'idle' | 'checking' | 'missing' | 'error'
+  >('idle')
+  const [prepareMessage, setPrepareMessage] = useState('')
   const [sheetOpen, setSheetOpen] = useState(false)
   const [selectedKey, setSelectedKey] = useState('')
   const fillableItems = useMemo(
@@ -105,10 +119,18 @@ export function WorkHourFillActionCard({
     [items]
   )
   const visibleItems = fillableItems.slice(0, 12)
-  const savedCount = savedKeys.size
+  const savedKeys = useMemo(
+    () => new Set(savedWorkHours.keys()),
+    [savedWorkHours]
+  )
+  const savedCount = savedWorkHours.size
+  const hasSavedPositiveWorkHour = hasPositiveWorkHour(savedWorkHours.values())
   const canQuickFill = fillableItems.length > 0
-  const canRunDailyReport = Boolean(onRegenerate || threadRuntime)
   const shouldClampList = visibleItems.length > 4
+  const conversationId =
+    readText(confirmationContext?.sessionId) ||
+    readText(confirmationContext?.threadId)
+  const canPrepareDailyReport = Boolean(workDate && conversationId)
 
   useEffect(() => {
     if (!canQuickFill) {
@@ -123,10 +145,10 @@ export function WorkHourFillActionCard({
     }
   }, [canQuickFill, fillableItems, selectedKey])
 
-  function handleSaved(key: string) {
-    setSavedKeys((current) => {
-      const next = new Set(current)
-      next.add(key)
+  function handleSaved(key: string, workHour: number) {
+    setSavedWorkHours((current) => {
+      const next = new Map(current)
+      next.set(key, workHour)
       return next
     })
   }
@@ -136,13 +158,47 @@ export function WorkHourFillActionCard({
     setSheetOpen(true)
   }
 
-  function handleRegenerateDailyReport() {
-    if (!canRunDailyReport) return
-    if (onRegenerate) {
-      onRegenerate()
-      return
+  async function handlePrepareDailyReport() {
+    if (!workDate || !conversationId || prepareState === 'checking') return
+
+    setPrepareState('checking')
+    setPrepareMessage('')
+    try {
+      const response = await prepareDailyReport({
+        workDate,
+        conversationId,
+        userSupplement: references?.userContent.join('\n'),
+        confirmationContext,
+      })
+      if (response.status === 'DRAFT_READY') {
+        const draft = parseDailyReportDraftResult(response.result)
+        if (!draft) {
+          setPrepareState('error')
+          setPrepareMessage('日报数据已返回，但页面暂时无法展示，请稍后重试。')
+          return
+        }
+        onDailyReportPrepared(draft, response.message)
+        return
+      }
+      if (response.status === 'MISSING_WORK_HOURS') {
+        setPrepareState('missing')
+        setPrepareMessage(
+          response.message || 'OA 中仍未检测到大于 0 小时的有效工时。'
+        )
+        return
+      }
+      setPrepareState('error')
+      setPrepareMessage(
+        response.status === 'UNKNOWN'
+          ? 'OA 工时数据读取不完整，暂时无法确认，请稍后重新检查。'
+          : response.message || '暂时无法检查工时，请稍后重试。'
+      )
+    } catch (error) {
+      setPrepareState('error')
+      setPrepareMessage(
+        dailyReportErrorMessage(error, '暂时无法检查工时，请稍后重试。')
+      )
     }
-    threadRuntime?.append('重新生成日报草稿')
   }
 
   return (
@@ -214,15 +270,14 @@ export function WorkHourFillActionCard({
                       : `共 ${fillableItems.length} 项待填工时`}
                   </div>
                   <div className='text-muted-foreground mt-1 text-xs'>
-                    保存后可重新生成日报草稿，系统会重新读取 OA 数据。
+                    {hasSavedPositiveWorkHour
+                      ? '已存在有效工时，现在可以继续生成日报草稿。'
+                      : savedCount > 0
+                        ? '日报至少需要一项大于 0 小时的工时，请继续填写。'
+                        : '至少保存一项大于 0 小时的工时后，才能继续生成日报。'}
                   </div>
                 </div>
               </div>
-
-              <WorkHourQuickActions
-                canWriteDailyReport={canRunDailyReport}
-                onWriteDailyReport={handleRegenerateDailyReport}
-              />
             </div>
 
             <WorkHourFillSheet
@@ -270,41 +325,79 @@ export function WorkHourFillActionCard({
                 </Button>
               </div>
             </div>
-            <WorkHourQuickActions
-              canWriteDailyReport={canRunDailyReport}
-              onWriteDailyReport={handleRegenerateDailyReport}
-            />
           </div>
         )}
+        <DailyReportContinuation
+          hasSavedPositiveWorkHour={hasSavedPositiveWorkHour}
+          canPrepare={canPrepareDailyReport}
+          state={prepareState}
+          message={prepareMessage}
+          onPrepare={handlePrepareDailyReport}
+        />
       </CardContent>
     </Card>
   )
 }
 
-function WorkHourQuickActions({
-  canWriteDailyReport,
-  onWriteDailyReport,
+function DailyReportContinuation({
+  hasSavedPositiveWorkHour,
+  canPrepare,
+  state,
+  message,
+  onPrepare,
 }: {
-  canWriteDailyReport: boolean
-  onWriteDailyReport: () => void
+  hasSavedPositiveWorkHour: boolean
+  canPrepare: boolean
+  state: 'idle' | 'checking' | 'missing' | 'error'
+  message: string
+  onPrepare: () => void
 }) {
+  const checking = state === 'checking'
   return (
-    <div className='flex flex-col gap-2'>
-      <div className='text-muted-foreground px-1 text-xs font-medium'>
-        猜你后续要做
+    <div className='flex flex-col gap-3 border-t px-4 py-4 sm:px-5'>
+      <div className='min-w-0'>
+        <div className='text-sm font-medium'>
+          {hasSavedPositiveWorkHour ? '下一步' : '已经在 OA 登记了工时？'}
+        </div>
+        <div className='text-muted-foreground mt-1 text-xs'>
+          {hasSavedPositiveWorkHour
+            ? '重新读取 OA 数据并生成日报草稿。'
+            : '无需重复填写，重新检查后会直接继续生成日报。'}
+        </div>
       </div>
-      <div className='flex flex-wrap gap-2'>
+      <div className='flex flex-wrap items-center gap-2'>
         <Button
           size='sm'
-          variant='outline'
-          className='rounded-full'
-          onClick={onWriteDailyReport}
-          disabled={!canWriteDailyReport}
+          variant={hasSavedPositiveWorkHour ? 'default' : 'outline'}
+          onClick={onPrepare}
+          disabled={!canPrepare || checking}
         >
-          <FileText data-icon='inline-start' />
-          写日报
+          {checking ? (
+            <LoaderCircle className='animate-spin' />
+          ) : hasSavedPositiveWorkHour ? (
+            <FileText data-icon='inline-start' />
+          ) : (
+            <RefreshCw data-icon='inline-start' />
+          )}
+          {checking
+            ? '正在检查'
+            : hasSavedPositiveWorkHour
+              ? '生成日报草稿'
+              : '重新检查并继续'}
         </Button>
       </div>
+      {message ? (
+        <div
+          className={cn(
+            'rounded-md border px-3 py-2 text-xs',
+            state === 'missing'
+              ? 'border-amber-500/30 bg-amber-500/5 text-amber-800 dark:text-amber-200'
+              : 'border-destructive/30 bg-destructive/5 text-destructive'
+          )}
+        >
+          {message}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -404,7 +497,7 @@ export function WorkHourFillSheet({
   workDate?: string
   confirmationContext?: Record<string, unknown>
   savedKeys: Set<string>
-  onSaved: (key: string) => void
+  onSaved: (key: string, workHour: number) => void
   open?: boolean
   onOpenChange?: (open: boolean) => void
   selectedKey?: string
@@ -590,7 +683,7 @@ export function WorkHourFillSheet({
         return
       }
 
-      onSaved(selectedItem.key)
+      onSaved(selectedItem.key, Number(form.workHour))
       setSaveState('idle')
       toast.success('保存成功', { position: 'top-right' })
 

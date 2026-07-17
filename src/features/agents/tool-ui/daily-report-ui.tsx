@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useThreadRuntime } from '@assistant-ui/react'
 import {
   AlertTriangle,
   ChevronRight,
   CheckCircle2,
   ClipboardList,
-  ExternalLink,
   FileText,
   LoaderCircle,
-  RefreshCw,
   Save,
   Send,
 } from 'lucide-react'
@@ -40,7 +37,6 @@ import {
   dailyReportOperationCopy,
 } from '../daily-report'
 import { isDailyReportConfirmationAccepted } from '../daily-report-confirmation'
-import { OA_MY_WORK_ITEM_URL } from './constants'
 import {
   DailyReportSectionView,
   DailyReportSummaryCards,
@@ -68,7 +64,7 @@ import {
 } from './daily-report-status'
 import { IconFrame, textareaClassName } from './primitives'
 import { readString, readText } from './shared'
-import { WorkHourFillActionCard, WorkHourFillSheet } from './work-hour-ui'
+import { WorkHourFillActionCard } from './work-hour-ui'
 
 export function OaDailyReportDraftCard({
   draft,
@@ -79,13 +75,16 @@ export function OaDailyReportDraftCard({
   message?: string
   displayMode?: 'draft' | 'detail'
 }) {
-  const threadRuntime = useThreadRuntime({ optional: true })
   const isDetailView = displayMode === 'detail'
   const isUpdate = draft.operationMode === 'update'
   const operationCopy = dailyReportOperationCopy(draft.operationMode)
   const initiallySubmitted = draft.submitted || draft.status === 'SUBMITTED'
   const [serverDraft, setServerDraft] =
     useState<DailyReportDraftStatusResponse | null>(null)
+  const [preparedDailyReport, setPreparedDailyReport] = useState<{
+    draft: DailyReportDraftResult
+    message?: string
+  } | null>(null)
   const [submitState, setSubmitState] = useState<
     'idle' | 'submitting' | 'success' | 'error'
   >(() => (initiallySubmitted ? 'success' : 'idle'))
@@ -101,9 +100,6 @@ export function OaDailyReportDraftCard({
     initialOverdueReasons(draft.overdueReasonItems, draft.overdueReasons)
   )
   const [savedRemark] = useState(() => draft.remark || '')
-  const [savedWorkHourKeys, setSavedWorkHourKeys] = useState<Set<string>>(
-    () => new Set()
-  )
 
   useEffect(() => {
     if (!draft.draftId) return
@@ -178,12 +174,6 @@ export function OaDailyReportDraftCard({
   )
   const hasMissingWorkHours =
     Boolean(missingWorkHourBlocker) || isDailyReportMissingWorkHours(draft)
-  const savedWorkHourCount = savedWorkHourKeys.size
-  const hasStructuredMissingWorkHours =
-    hasMissingWorkHours && missingWorkHourItems.length > 0
-  const canRegenerateDraft =
-    Boolean(threadRuntime) &&
-    (!hasStructuredMissingWorkHours || savedWorkHourCount > 0)
   async function handleConfirm() {
     if (!draft.draftId || !canSubmit || submitState === 'submitting') return
 
@@ -240,9 +230,14 @@ export function OaDailyReportDraftCard({
     }
   }
 
-  function handleRegenerateDraft() {
-    if (!canRegenerateDraft) return
-    threadRuntime?.append('重新生成日报草稿')
+  if (preparedDailyReport) {
+    return (
+      <OaDailyReportDraftCard
+        draft={preparedDailyReport.draft}
+        message={preparedDailyReport.message}
+        displayMode={displayMode}
+      />
+    )
   }
 
   if (!hasSubmitted && hasMissingWorkHours) {
@@ -258,7 +253,12 @@ export function OaDailyReportDraftCard({
         }
         title={draft.readiness.title || '先登记工时，再生成日报'}
         emptyDescription='没有拿到可直接填工时的列表，可以先去我的工作项处理，再重新生成日报草稿。'
-        onRegenerate={() => threadRuntime?.append('重新生成日报草稿')}
+        onDailyReportPrepared={(preparedDraft, preparedMessage) =>
+          setPreparedDailyReport({
+            draft: preparedDraft,
+            message: preparedMessage,
+          })
+        }
         references={draft.references}
       />
     )
@@ -552,60 +552,19 @@ export function OaDailyReportDraftCard({
                       ? hasSubmitted
                         ? '本次修改已保存到 OA'
                         : '当前内容与 OA 一致，修改后可再次保存'
-                      : savedWorkHourCount > 0
-                        ? '已补充 ' +
-                          savedWorkHourCount +
-                          ' 项工时，请重新生成日报草稿后再提交'
-                        : missingOverdueReasonCount > 0
-                          ? '请在上方红框中补充原因，完成后即可提交'
-                          : activeBlockers[0]?.description ||
-                            (hasSubmitted
-                              ? 'OA 已保存本次日报'
-                              : isUpdate
-                                ? '请最后核对修改后的工作总结和日报明细'
-                                : '请最后核对工作总结和日报明细')}
+                      : missingOverdueReasonCount > 0
+                        ? '请在上方红框中补充原因，完成后即可提交'
+                        : activeBlockers[0]?.description ||
+                          (hasSubmitted
+                            ? 'OA 已保存本次日报'
+                            : isUpdate
+                              ? '请最后核对修改后的工作总结和日报明细'
+                              : '请最后核对工作总结和日报明细')}
                   </div>
                 </div>
               </div>
 
               <div className='flex flex-wrap items-center gap-2'>
-                {hasStructuredMissingWorkHours ? (
-                  <WorkHourFillSheet
-                    items={missingWorkHourItems}
-                    workDate={draft.workDate}
-                    confirmationContext={draft.confirmationContext}
-                    savedKeys={savedWorkHourKeys}
-                    onSaved={(key) =>
-                      setSavedWorkHourKeys((current) => {
-                        const next = new Set(current)
-                        next.add(key)
-                        return next
-                      })
-                    }
-                  />
-                ) : hasMissingWorkHours ? (
-                  <Button asChild size='sm' variant='outline'>
-                    <a
-                      href={OA_MY_WORK_ITEM_URL}
-                      target='_blank'
-                      rel='noreferrer'
-                    >
-                      <ExternalLink />
-                      去我的工作项填写工时
-                    </a>
-                  </Button>
-                ) : null}
-                {!hasSubmitted && hasMissingWorkHours ? (
-                  <Button
-                    size='sm'
-                    variant='secondary'
-                    onClick={handleRegenerateDraft}
-                    disabled={!threadRuntime}
-                  >
-                    <RefreshCw data-icon='inline-start' />
-                    重新生成草稿
-                  </Button>
-                ) : null}
                 {showConfirmButton ? (
                   <Button
                     size='sm'

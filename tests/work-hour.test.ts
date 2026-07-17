@@ -5,12 +5,19 @@ import type { WorkHourOptionsResponse } from '../src/features/agents/api.ts'
 import {
   highWorkHourConfirmation,
   highWorkHourConfirmationDetails,
+  hasPositiveWorkHour,
   isAllowedWorkHourDate,
   isWorkHourDateEditable,
   workHourDateOptions,
   workHourErrorMessage,
   workHourLimits,
 } from '../src/features/agents/work-hour.ts'
+
+test('distinguishes a positive work hour saved in the current card', () => {
+  assert.equal(hasPositiveWorkHour([]), false)
+  assert.equal(hasPositiveWorkHour([0]), false)
+  assert.equal(hasPositiveWorkHour([0, 0.1]), true)
+})
 
 test('uses the exact non-contiguous date list returned by the BFF', () => {
   const options = createOptions({

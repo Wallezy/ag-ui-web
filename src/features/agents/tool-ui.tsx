@@ -40,10 +40,7 @@ import {
 } from '@/components/assistant-ui/tool-group'
 import { redirectToOaLogin, type MissingWorkHourItem } from './api'
 import { dailyReportErrorMessage } from './daily-report'
-import {
-  isDailyReportMissingWorkHours,
-  parseDailyReportDraftResult,
-} from './tool-ui/daily-report-model'
+import { parseDailyReportDraftResult } from './tool-ui/daily-report-model'
 import {
   OaDailyReportDraftCard,
   OaDailyReportStatusCard,
@@ -81,6 +78,41 @@ type WorkHourFillActionResult = {
   workDate?: string
   items: MissingWorkHourItem[]
   confirmationContext?: Record<string, unknown>
+}
+
+function WorkHourFillResultCard({
+  action,
+  message,
+}: {
+  action: WorkHourFillActionResult
+  message?: string
+}) {
+  const [preparedDailyReport, setPreparedDailyReport] = useState<{
+    draft: NonNullable<ReturnType<typeof parseDailyReportDraftResult>>
+    message?: string
+  } | null>(null)
+
+  if (preparedDailyReport) {
+    return (
+      <OaDailyReportDraftCard
+        draft={preparedDailyReport.draft}
+        message={preparedDailyReport.message}
+      />
+    )
+  }
+
+  return (
+    <WorkHourFillActionCard
+      items={action.items}
+      workDate={action.workDate}
+      confirmationContext={action.confirmationContext}
+      message={message}
+      title='填工时'
+      onDailyReportPrepared={(draft, preparedMessage) =>
+        setPreparedDailyReport({ draft, message: preparedMessage })
+      }
+    />
+  )
 }
 
 const weatherToolNames = new Set(['get-weather', 'weatherTool'])
@@ -212,9 +244,6 @@ function OaToolResultCard({ result }: { result: OaToolResult }) {
   ) {
     const draft = parseDailyReportDraftResult(result.result)
     if (draft) {
-      if (isDailyReportMissingWorkHours(draft)) {
-        return null
-      }
       return <OaDailyReportDraftCard draft={draft} message={result.message} />
     }
     if (
@@ -229,15 +258,7 @@ function OaToolResultCard({ result }: { result: OaToolResult }) {
   if (result.toolName === 'prepareWorkHourFill') {
     const action = parseWorkHourFillActionResult(result.result)
     if (action) {
-      return (
-        <WorkHourFillActionCard
-          items={action.items}
-          workDate={action.workDate}
-          confirmationContext={action.confirmationContext}
-          message={result.message}
-          title='填工时'
-        />
-      )
+      return <WorkHourFillResultCard action={action} message={result.message} />
     }
   }
 

@@ -131,6 +131,16 @@ export type DailyReportDraftStatusResponse = {
   message?: string
 }
 
+export type PrepareDailyReportResponse = {
+  status: 'DRAFT_READY' | 'MISSING_WORK_HOURS' | 'UNKNOWN' | 'FAILED'
+  success: boolean
+  message?: string
+  errorCode?: string
+  auditId?: string
+  details?: Record<string, unknown>
+  result?: Record<string, unknown>
+}
+
 export type MissingWorkHourItem = {
   key: string
   type: 'task' | 'bug'
@@ -393,6 +403,21 @@ export async function confirmDailyReport(
 export async function getDailyReportDraftStatus(draftId: string) {
   return request<DailyReportDraftStatusResponse>(
     `/api/agent/daily-report-drafts/${encodeURIComponent(draftId)}`
+  )
+}
+
+export async function prepareDailyReport(payload: {
+  workDate: string
+  conversationId: string
+  userSupplement?: string
+  confirmationContext?: Record<string, unknown>
+}) {
+  return request<PrepareDailyReportResponse>(
+    '/api/agent/oa/daily-reports/prepare',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
   )
 }
 

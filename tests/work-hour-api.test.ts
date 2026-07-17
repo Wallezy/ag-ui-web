@@ -2,10 +2,45 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   getWorkHourOptions,
+  prepareDailyReport,
   saveWorkHourExecutionWithIntentRefresh,
   type SaveWorkHourExecutionRequest,
 } from '../src/features/agents/api.ts'
 import { ApiRequestError } from '../src/features/agents/api-error.ts'
+
+test('rechecks OA work hours and prepares the report through the Agent BFF', async () => {
+  const originalFetch = globalThis.fetch
+  let requestBody: Record<string, unknown> = {}
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), '/api/agent/oa/daily-reports/prepare')
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+    return jsonResponse({
+      status: 'DRAFT_READY',
+      success: true,
+      message: '日报草稿已生成',
+      result: { draftId: 'DRAFT-1', workDate: '2026-07-17' },
+    })
+  }
+
+  try {
+    const response = await prepareDailyReport({
+      workDate: '2026-07-17',
+      conversationId: 'conversation-1',
+      userSupplement: '完成接口联调',
+      confirmationContext: { traceId: 'trace-1' },
+    })
+
+    assert.equal(response.status, 'DRAFT_READY')
+    assert.deepEqual(requestBody, {
+      workDate: '2026-07-17',
+      conversationId: 'conversation-1',
+      userSupplement: '完成接口联调',
+      confirmationContext: { traceId: 'trace-1' },
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
 
 test('loads the complete work-hour form through one Agent BFF request', async () => {
   const originalFetch = globalThis.fetch

@@ -88,6 +88,13 @@ export function isAllowedWorkHourDate(
   return workHourDateOptions(options).some((item) => item.date === workDate)
 }
 
+export function hasPositiveWorkHour(workHours: Iterable<number>) {
+  for (const workHour of workHours) {
+    if (Number.isFinite(workHour) && workHour > 0) return true
+  }
+  return false
+}
+
 export function workHourLimits(
   options: WorkHourOptionsResponse | null,
   type: 'task' | 'bug'
