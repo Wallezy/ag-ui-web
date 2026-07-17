@@ -12,7 +12,6 @@ type DailyReportEditState = {
 }
 
 type DailyReportPersistedState = {
-  detailView: boolean
   existingReport: boolean
   submitted: boolean
   hasUnsavedChanges: boolean
@@ -67,12 +66,11 @@ export function hasUnsavedDailyReportChanges({
 }
 
 export function isDailyReportPersisted({
-  detailView,
   existingReport,
   submitted,
   hasUnsavedChanges,
 }: DailyReportPersistedState) {
-  return submitted || (detailView && existingReport && !hasUnsavedChanges)
+  return submitted || (existingReport && !hasUnsavedChanges)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -81,10 +81,9 @@ test('accepts nested OA detail payloads without exposing transport fields', () =
   assert.equal(status?.payload.remark, '工作总结')
 })
 
-test('treats an unchanged OA report as submitted instead of pending save', () => {
+test('treats an unchanged OA report as submitted in every display mode', () => {
   assert.equal(
     isDailyReportPersisted({
-      detailView: true,
       existingReport: true,
       submitted: false,
       hasUnsavedChanges: false,
@@ -104,7 +103,6 @@ test('marks an existing OA report pending only after the user edits it', () => {
   assert.equal(hasUnsavedChanges, true)
   assert.equal(
     isDailyReportPersisted({
-      detailView: true,
       existingReport: true,
       submitted: false,
       hasUnsavedChanges,

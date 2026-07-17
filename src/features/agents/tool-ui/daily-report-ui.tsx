@@ -80,6 +80,7 @@ export function OaDailyReportDraftCard({
   const isUpdate = draft.operationMode === 'update'
   const operationCopy = dailyReportOperationCopy(draft.operationMode)
   const initiallySubmitted = draft.submitted || draft.status === 'SUBMITTED'
+  const initiallyPersisted = initiallySubmitted || draft.existingReport
   const [serverDraft, setServerDraft] =
     useState<DailyReportDraftStatusResponse | null>(null)
   const [preparedDailyReport, setPreparedDailyReport] = useState<{
@@ -90,7 +91,7 @@ export function OaDailyReportDraftCard({
     'idle' | 'submitting' | 'success' | 'error'
   >(() => (initiallySubmitted ? 'success' : 'idle'))
   const [isExpanded, setIsExpanded] = useState(
-    () => isDetailView || !initiallySubmitted
+    () => isDetailView || !initiallyPersisted
   )
   const [submitError, setSubmitError] = useState('')
   const [overdueReasons, setOverdueReasons] = useState<Record<string, string>>(
@@ -142,7 +143,6 @@ export function OaDailyReportDraftCard({
     savedOverdueReasons,
   })
   const reportPersisted = isDailyReportPersisted({
-    detailView: isDetailView,
     existingReport: draft.existingReport,
     submitted: hasSubmitted,
     hasUnsavedChanges,
@@ -165,7 +165,7 @@ export function OaDailyReportDraftCard({
   const canSubmit =
     showConfirmButton &&
     missingOverdueReasonCount === 0 &&
-    (!isDetailView || hasUnsavedChanges)
+    (!draft.existingReport || hasUnsavedChanges)
   const hasPendingOverdueReasons = missingOverdueReasonCount > 0
   const activeBlockers = draft.readiness.blockers.filter(
     (item) =>
@@ -289,18 +289,19 @@ export function OaDailyReportDraftCard({
       : hasPendingOverdueReasons
         ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
         : 'bg-primary/10 text-primary'
-  const actionTitle =
-    isDetailView && reportPersisted
-      ? '日报已提交'
-      : hasSubmitted
-        ? isUpdate
-          ? '日报修改已保存'
-          : '日报已提交'
-        : missingOverdueReasonCount > 0
-          ? `还需填写 ${missingOverdueReasonCount} 项逾期原因`
-          : hasValidationProblem
-            ? activeBlockers[0]?.title || '还有信息待补充'
-            : operationCopy.readyAction
+  const actionTitle = reportPersisted
+    ? hasSubmitted && isUpdate
+      ? '日报修改已保存'
+      : '日报已提交'
+    : hasSubmitted
+      ? isUpdate
+        ? '日报修改已保存'
+        : '日报已提交'
+      : missingOverdueReasonCount > 0
+        ? `还需填写 ${missingOverdueReasonCount} 项逾期原因`
+        : hasValidationProblem
+          ? activeBlockers[0]?.title || '还有信息待补充'
+          : operationCopy.readyAction
   const actionDescriptionClass = reportPersisted
     ? 'text-muted-foreground'
     : hasValidationProblem
@@ -339,8 +340,8 @@ export function OaDailyReportDraftCard({
                     ? draft.workDate
                       ? `${draft.workDate} 工作日报`
                       : '日报详情'
-                    : hasSubmitted
-                      ? isUpdate
+                    : reportPersisted
+                      ? hasSubmitted && isUpdate
                         ? '日报修改已保存'
                         : '日报已提交'
                       : hasValidationProblem
@@ -353,9 +354,9 @@ export function OaDailyReportDraftCard({
                   <Badge variant='secondary'>
                     {reportPersisted ? '已提交' : '待保存'}
                   </Badge>
-                ) : hasSubmitted ? (
+                ) : reportPersisted ? (
                   <Badge variant='secondary'>
-                    {isUpdate ? '已保存' : '已提交'}
+                    {hasSubmitted && isUpdate ? '已保存' : '已提交'}
                   </Badge>
                 ) : hasValidationProblem ? (
                   <Badge variant='secondary'>待补充</Badge>
@@ -370,8 +371,8 @@ export function OaDailyReportDraftCard({
                   ? reportPersisted
                     ? '日报已提交到 OA，修改工作总结后可以再次保存。'
                     : '内容已有修改，保存后将同步到 OA。'
-                  : hasSubmitted
-                    ? isUpdate
+                  : reportPersisted
+                    ? hasSubmitted && isUpdate
                       ? `${draft.workDate ? `${draft.workDate} 的` : ''}日报修改已同步到 OA。`
                       : '无需重新再提交，是否需要修改。'
                     : hasValidationProblem
@@ -390,7 +391,7 @@ export function OaDailyReportDraftCard({
               </CardDescription>
             </div>
             <CardAction className='flex items-center gap-1'>
-              {hasSubmitted && !isExpanded ? (
+              {reportPersisted && !isExpanded ? (
                 <Button
                   type='button'
                   size='sm'
@@ -438,14 +439,12 @@ export function OaDailyReportDraftCard({
                   </div>
                 </div>
                 <Badge variant='outline'>
-                  {isDetailView
-                    ? reportPersisted
-                      ? '已提交'
-                      : '待保存'
-                    : hasSubmitted
-                      ? isUpdate
-                        ? '已保存'
-                        : '已提交'
+                  {reportPersisted
+                    ? hasSubmitted && isUpdate
+                      ? '已保存'
+                      : '已提交'
+                    : isDetailView
+                      ? '待保存'
                       : operationCopy.reportBadge}
                 </Badge>
               </div>
@@ -567,7 +566,7 @@ export function OaDailyReportDraftCard({
                 <div className='min-w-0'>
                   <div className='text-sm font-medium'>{actionTitle}</div>
                   <div className={cn('mt-1 text-xs', actionDescriptionClass)}>
-                    {isDetailView && reportPersisted
+                    {reportPersisted
                       ? hasSubmitted
                         ? '本次修改已保存到 OA'
                         : '当前内容与 OA 一致，修改后可再次保存'
