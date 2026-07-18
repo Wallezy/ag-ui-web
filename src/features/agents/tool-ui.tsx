@@ -133,7 +133,7 @@ const oaToolCopy: Record<
 > = {
   getMyWorkItems: {
     title: '查询 OA 工作项',
-    running: '正在读取当前用户可见的任务、需求和缺陷。',
+    running: '正在按成员、项目和日期读取有权查看的任务与缺陷。',
     badge: 'Work Items',
     icon: ClipboardList,
   },
@@ -396,6 +396,8 @@ function OaDailyReportSuccessCard({ auditId }: { auditId?: string }) {
 }
 
 function OaErrorCard({ result }: { result: OaToolResult }) {
+  const isWorkItemPermissionError =
+    result.errorCode === 'WORK_ITEM_PERMISSION_DENIED'
   const isDailyReportError =
     result.toolName === 'generateDailyReportDraft' ||
     result.toolName === 'getActiveDailyReportDraft' ||
@@ -407,19 +409,27 @@ function OaErrorCard({ result }: { result: OaToolResult }) {
     result.errorCode?.includes('WORK_HOUR') ||
     result.toolName === 'prepareWorkHourFill' ||
     result.toolName === 'saveWorkHourExecution'
-  const Icon = isValidationError ? AlertTriangle : XCircle
-  const title = isValidationError
-    ? '日报校验未通过'
-    : isDailyReportError
-      ? '日报暂未保存'
-      : isWorkHourError
-        ? '工时未保存'
-        : '暂时无法完成操作'
-  const message = isWorkHourError
-    ? workHourErrorMessage(result)
-    : isDailyReportError
-      ? dailyReportErrorMessage(result)
-      : result.message || '请稍后重试，或检查当前 OA 登录状态。'
+  const Icon = isWorkItemPermissionError
+    ? ShieldAlert
+    : isValidationError
+      ? AlertTriangle
+      : XCircle
+  const title = isWorkItemPermissionError
+    ? '无权查询工作项'
+    : isValidationError
+      ? '日报校验未通过'
+      : isDailyReportError
+        ? '日报暂未保存'
+        : isWorkHourError
+          ? '工时未保存'
+          : '暂时无法完成操作'
+  const message = isWorkItemPermissionError
+    ? result.message || '当前账号没有目标项目的工作项查询权限。'
+    : isWorkHourError
+      ? workHourErrorMessage(result)
+      : isDailyReportError
+        ? dailyReportErrorMessage(result)
+        : result.message || '请稍后重试，或检查当前 OA 登录状态。'
 
   return (
     <Card className='w-full max-w-xl gap-4 rounded-lg py-4 shadow-none'>

@@ -110,3 +110,29 @@ test('infers failure from legacy page errors when every requested type failed', 
   assert.equal(result.completeness.status, 'FAILED')
   assert.deepEqual(result.completeness.unavailableWorkItemTypes, ['task'])
 })
+
+test('keeps assignee and project query context for the result card', () => {
+  const result = parseWorkItemsResult({
+    items: [],
+    count: 0,
+    user: { userId: '9', userName: '李文卓' },
+    requestedBy: { userId: '1', userName: '当前用户' },
+    filters: {
+      overdue: true,
+      assigneeSpecified: true,
+      project: { projectId: '101', projectName: '星云平台' },
+    },
+    queryStatus: 'COMPLETE',
+    completeness: { status: 'COMPLETE', complete: true },
+    errors: [],
+  })
+
+  assert.ok(result)
+  assert.equal(result.user?.userName, '李文卓')
+  assert.equal(result.requestedBy?.userName, '当前用户')
+  assert.equal(result.filters?.overdue, true)
+  assert.deepEqual(result.filters?.project, {
+    projectId: '101',
+    projectName: '星云平台',
+  })
+})

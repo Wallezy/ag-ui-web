@@ -24,7 +24,9 @@ export type WorkItemsResult = {
   items: Record<string, unknown>[]
   count: number
   user?: Record<string, unknown>
+  requestedBy?: Record<string, unknown>
   dateRange?: Record<string, unknown>
+  filters?: Record<string, unknown>
   visitedProjectCount?: number
   errors: WorkItemQueryError[]
   completeness: WorkItemQueryCompleteness
@@ -86,7 +88,9 @@ export function parseWorkItemsResult(
     items,
     count: numberValue(result.count) ?? items.length,
     user: isRecord(result.user) ? result.user : undefined,
+    requestedBy: isRecord(result.requestedBy) ? result.requestedBy : undefined,
     dateRange: isRecord(result.dateRange) ? result.dateRange : undefined,
+    filters: isRecord(result.filters) ? result.filters : undefined,
     visitedProjectCount: numberValue(result.visitedProjectCount),
     errors,
     completeness: {
@@ -170,7 +174,7 @@ export function workItemQueryPresentation(
   return {
     title: 'OA 工作项',
     badge: '查询完整',
-    description: completeMessage || '已读取当前用户可见的工作项。',
+    description: completeMessage || '已读取符合权限和筛选条件的工作项。',
     countLabel: `${result.count} 项`,
     emptyTitle: '当前没有符合条件的工作项',
     emptyDescription: '可以调整日期范围或工作项类型后重新查询。',

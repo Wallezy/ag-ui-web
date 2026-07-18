@@ -18,6 +18,8 @@ import {
   formatDateRange,
   formatDateText,
   formatWorkItemType,
+  isRecord,
+  readBoolean,
   readText,
 } from './shared'
 
@@ -30,6 +32,13 @@ export function OaWorkItemsCard({
 }) {
   const visibleItems = result.items.slice(0, 8)
   const userName = readText(result.user?.userName)
+  const projectFilter = isRecord(result.filters?.project)
+    ? result.filters.project
+    : undefined
+  const projectName = readText(projectFilter?.projectName)
+  const assigneeSpecified =
+    readBoolean(result.filters?.assigneeSpecified) === true
+  const overdueOnly = readBoolean(result.filters?.overdue) === true
   const dateRange = formatDateRange(result.dateRange)
   const presentation = workItemQueryPresentation(result, message)
   const queryStatus = result.completeness.status
@@ -51,7 +60,11 @@ export function OaWorkItemsCard({
           <div className='min-w-0 flex-1'>
             <div className='flex min-w-0 flex-wrap items-center gap-2'>
               <CardTitle className='truncate text-base'>
-                {presentation.title}
+                {assigneeSpecified && userName
+                  ? `${userName}的工作项`
+                  : projectName
+                    ? `${projectName}工作项`
+                    : presentation.title}
               </CardTitle>
               <Badge
                 variant={
@@ -69,6 +82,7 @@ export function OaWorkItemsCard({
               >
                 {presentation.badge}
               </Badge>
+              {overdueOnly ? <Badge variant='destructive'>仅逾期</Badge> : null}
             </div>
             <CardDescription className='mt-1'>
               {presentation.description}
@@ -82,16 +96,18 @@ export function OaWorkItemsCard({
 
       <CardContent className='flex flex-col gap-4 px-4 sm:px-5'>
         <div className='grid gap-2 sm:grid-cols-3'>
-          <OaMetric label='当前用户' value={userName || '-'} />
-          <OaMetric label='日期范围' value={dateRange || '-'} />
           <OaMetric
-            label='访问项目'
+            label='查询对象'
             value={
-              result.visitedProjectCount === undefined
-                ? '-'
-                : `${result.visitedProjectCount} 个`
+              assigneeSpecified
+                ? userName || '-'
+                : projectName
+                  ? '项目成员'
+                  : userName || '-'
             }
           />
+          <OaMetric label='项目' value={projectName || '全部可见项目'} />
+          <OaMetric label='日期范围' value={dateRange || '-'} />
         </div>
 
         {presentation.noticeTitle && visibleItems.length ? (
@@ -182,6 +198,7 @@ function WorkItemRow({ item }: { item: Record<string, unknown> }) {
     readText(item.dueDate) ||
     readText(item.planEndDate) ||
     readText(item.endDate)
+  const overdue = readBoolean(item.overdue) === true
 
   return (
     <div className='border-border/70 flex flex-col gap-2 border-b px-3 py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between'>
@@ -190,6 +207,7 @@ function WorkItemRow({ item }: { item: Record<string, unknown> }) {
           {type ? (
             <Badge variant='outline'>{formatWorkItemType(type)}</Badge>
           ) : null}
+          {overdue ? <Badge variant='destructive'>已逾期</Badge> : null}
           <div className='truncate text-sm font-medium'>{title}</div>
         </div>
         <div className='text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
