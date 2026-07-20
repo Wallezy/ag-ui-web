@@ -30,6 +30,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import {
   confirmDailyReport,
+  generateDailyReportAiAbstract,
   getDailyReportDraftStatus,
   type DailyReportDraftStatusResponse,
 } from '../api'
@@ -88,7 +89,7 @@ export function OaDailyReportDraftCard({
     message?: string
   } | null>(null)
   const [submitState, setSubmitState] = useState<
-    'idle' | 'submitting' | 'success' | 'error'
+    'idle' | 'generatingAbstract' | 'submitting' | 'success' | 'error'
   >(() => (initiallySubmitted ? 'success' : 'idle'))
   const [isExpanded, setIsExpanded] = useState(
     () => isDetailView || !initiallyPersisted
@@ -166,6 +167,9 @@ export function OaDailyReportDraftCard({
     showConfirmButton &&
     missingOverdueReasonCount === 0 &&
     (!draft.existingReport || hasUnsavedChanges)
+  const isGeneratingAbstract = submitState === 'generatingAbstract'
+  const isSubmitting = submitState === 'submitting'
+  const isSubmitBusy = isGeneratingAbstract || isSubmitting
   const hasPendingOverdueReasons = missingOverdueReasonCount > 0
   const activeBlockers = draft.readiness.blockers.filter(
     (item) =>
@@ -181,13 +185,38 @@ export function OaDailyReportDraftCard({
   const hasMissingWorkHours =
     Boolean(missingWorkHourBlocker) || isDailyReportMissingWorkHours(draft)
   async function handleConfirm() {
-    if (!draft.draftId || !canSubmit || submitState === 'submitting') return
+    if (!draft.draftId || !canSubmit || isSubmitBusy) return
 
-    setSubmitState('submitting')
+    let phase: 'generatingAbstract' | 'submitting' = 'generatingAbstract'
+    setSubmitState('generatingAbstract')
     setSubmitError('')
     const confirmedOverdueReasons = compactStringMap(overdueReasons)
 
     try {
+      const abstractResponse = await generateDailyReportAiAbstract({
+        draftId: draft.draftId,
+        draftVersion: draft.draftVersion,
+        confirmedContent: remarkDraft,
+        overdueReasons: confirmedOverdueReasons,
+        confirmationContext: draft.confirmationContext,
+      })
+      const aiAbstract =
+        readText(abstractResponse.aiAbstract)?.trim() ||
+        readText(abstractResponse.result?.aiAbstract)?.trim() ||
+        ''
+      if (!abstractResponse.success || !aiAbstract) {
+        setSubmitState('error')
+        setSubmitError(
+          dailyReportErrorMessage(
+            abstractResponse,
+            '暂时无法生成日报摘要，请稍后重试。'
+          )
+        )
+        return
+      }
+
+      phase = 'submitting'
+      setSubmitState('submitting')
       const response = await confirmDailyReport(
         {
           action: 'CONFIRM',
@@ -198,6 +227,7 @@ export function OaDailyReportDraftCard({
           draftVersion: draft.draftVersion,
           idempotencyKey: draft.idempotencyKey,
           confirmedContent: remarkDraft,
+          aiAbstract,
           overdueReasons: confirmedOverdueReasons,
           confirmationContext: draft.confirmationContext,
         },
@@ -232,7 +262,14 @@ export function OaDailyReportDraftCard({
       })
     } catch (error) {
       setSubmitState('error')
-      setSubmitError(dailyReportErrorMessage(error))
+      setSubmitError(
+        dailyReportErrorMessage(
+          error,
+          phase === 'generatingAbstract'
+            ? '暂时无法生成日报摘要，请稍后重试。'
+            : undefined
+        )
+      )
     }
   }
 
@@ -587,16 +624,22 @@ export function OaDailyReportDraftCard({
                   <Button
                     size='sm'
                     onClick={handleConfirm}
-                    disabled={!canSubmit || submitState === 'submitting'}
+                    disabled={!canSubmit || isSubmitBusy}
                   >
-                    {submitState === 'submitting' ? (
+                    {isSubmitBusy ? (
                       <LoaderCircle className='animate-spin' />
                     ) : isUpdate ? (
                       <Save />
                     ) : (
                       <Send />
                     )}
-                    {isDetailView ? '保存修改' : operationCopy.confirmLabel}
+                    {isGeneratingAbstract
+                      ? '正在生成摘要'
+                      : isSubmitting
+                        ? '正在提交'
+                        : isDetailView
+                          ? '保存修改'
+                          : operationCopy.confirmLabel}
                   </Button>
                 ) : null}
               </div>

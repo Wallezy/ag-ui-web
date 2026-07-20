@@ -72,6 +72,9 @@ export function dailyReportErrorMessage(
   if (code.includes('LOGIN') || code.includes('UNAUTHORIZED')) {
     return 'OA 登录状态已失效，请重新登录后再保存。'
   }
+  if (code.includes('AI_ABSTRACT')) {
+    return '暂时无法生成日报摘要，请稍后重试。'
+  }
   if (
     code.includes('HTTP_SERVER_ERROR') ||
     code.includes('TRANSPORT_ERROR') ||
