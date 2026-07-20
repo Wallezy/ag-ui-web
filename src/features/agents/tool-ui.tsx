@@ -57,7 +57,7 @@ import { parseWeatherResult, readLocation } from './tool-ui/weather-data'
 import { WeatherToolCard, WeatherToolLoadingCard } from './tool-ui/weather-ui'
 import { readMissingWorkHourItems } from './tool-ui/work-hour-data'
 import { WorkHourFillActionCard } from './tool-ui/work-hour-ui'
-import { OaWorkItemsCard } from './tool-ui/work-items-ui'
+import { OaWorkItemDetailCard, OaWorkItemsCard } from './tool-ui/work-items-ui'
 import { workHourErrorMessage } from './work-hour'
 import { parseWorkItemsResult } from './work-items-result'
 
@@ -236,6 +236,18 @@ function OaToolResultCard({ result }: { result: OaToolResult }) {
 
   if (result.success === false || result.errorCode) {
     return <OaErrorCard result={result} />
+  }
+
+  if (
+    result.toolName === 'getWorkItemDetail' &&
+    isRecord(result.result?.item)
+  ) {
+    return (
+      <OaWorkItemDetailCard
+        item={result.result.item}
+        message={result.message}
+      />
+    )
   }
 
   if (

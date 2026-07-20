@@ -177,6 +177,72 @@ export function OaWorkItemsCard({
   )
 }
 
+export function OaWorkItemDetailCard({
+  item,
+  message,
+}: {
+  item: Record<string, unknown>
+  message?: string
+}) {
+  const title =
+    readText(item.title) ||
+    readText(item.code) ||
+    readText(item.id) ||
+    '工作项详情'
+  const type = readText(item.type) || readText(item.workItemType)
+  const priority = readText(item.priorityLabel) || readText(item.priority)
+  const status = readText(item.statusLabel) || readText(item.status)
+  const project =
+    readText(item.projectName) ||
+    readText(item.projectTitle) ||
+    readText(item.project)
+  const owner =
+    readText(item.personChargeName) ||
+    readText(item.ownerName) ||
+    readText(item.assigneeName)
+  const dueDate =
+    readText(item.dueDate) ||
+    readText(item.planEndDate) ||
+    readText(item.endDate)
+  const overdue = readBoolean(item.overdue) === true
+
+  return (
+    <Card className='w-full max-w-2xl gap-4 rounded-lg py-4 shadow-none'>
+      <CardHeader className='gap-3 px-4 sm:px-5'>
+        <div className='flex items-start gap-3'>
+          <IconFrame icon={ClipboardList} />
+          <div className='min-w-0 flex-1'>
+            <div className='flex min-w-0 flex-wrap items-center gap-2'>
+              {type ? (
+                <Badge variant='outline'>{formatWorkItemType(type)}</Badge>
+              ) : null}
+              {overdue ? <Badge variant='destructive'>已逾期</Badge> : null}
+              <CardTitle className='min-w-0 text-base break-words'>
+                {title}
+              </CardTitle>
+            </div>
+            <CardDescription className='mt-1'>
+              {message || '已读取 OA 中的最新工作项详情。'}
+            </CardDescription>
+          </div>
+          <CardAction>
+            <Badge variant='secondary'>详情</Badge>
+          </CardAction>
+        </div>
+      </CardHeader>
+      <CardContent className='grid gap-2 px-4 sm:grid-cols-3 sm:px-5'>
+        <OaMetric label='优先级' value={priority || '-'} />
+        <OaMetric label='状态' value={status || '-'} />
+        <OaMetric label='项目' value={project || '-'} />
+        {owner ? <OaMetric label='负责人' value={owner} /> : null}
+        {dueDate ? (
+          <OaMetric label='截止日期' value={formatDateText(dueDate)} />
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
 function WorkItemRow({ item }: { item: Record<string, unknown> }) {
   const title =
     readText(item.title) ||
