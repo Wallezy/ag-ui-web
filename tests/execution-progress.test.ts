@@ -4,6 +4,7 @@ import {
   parseExecutionProgress,
   visibleExecutionProgress,
 } from '../src/features/agents/execution-progress-data.ts'
+import { visibleToolGroupPositions } from '../src/features/agents/tool-retry-data.ts'
 
 test('merges progress updates for the same step while preserving first-seen order', () => {
   const steps = parseExecutionProgress(
@@ -139,6 +140,113 @@ test('shows real actions and user handoffs instead of internal planning narratio
       { stepId: 'outcome', title: '可登记工时事项已就绪' },
     ]
   )
+})
+
+test('hides a failed tool attempt after the same operation succeeds on retry', () => {
+  const steps = visibleExecutionProgress(
+    parseExecutionProgress(
+      [
+        progressLine(
+          'tool:first',
+          'tool',
+          'failed',
+          '查询 OA 工作项失败',
+          1
+        ),
+        progressLine(
+          'observation:first',
+          'observation',
+          'failed',
+          '业务结果不可用',
+          2
+        ),
+        progressLine(
+          'tool:retry',
+          'tool',
+          'completed',
+          '查询 OA 工作项已完成',
+          3
+        ),
+        progressLine(
+          'response',
+          'response',
+          'completed',
+          '处理完成',
+          4
+        ),
+      ].join('\n')
+    )
+  )
+
+  assert.deepEqual(
+    steps.map(({ stepId, status }) => ({ stepId, status })),
+    [{ stepId: 'tool:retry', status: 'completed' }]
+  )
+})
+
+test('keeps a failed tool attempt when no later retry succeeds', () => {
+  const steps = visibleExecutionProgress(
+    parseExecutionProgress(
+      [
+        progressLine(
+          'tool:first',
+          'tool',
+          'failed',
+          '查询 OA 工作项失败',
+          1
+        ),
+        progressLine(
+          'response',
+          'response',
+          'completed',
+          '处理完成',
+          2
+        ),
+      ].join('\n')
+    )
+  )
+
+  assert.deepEqual(
+    steps.map(({ stepId, status }) => ({ stepId, status })),
+    [{ stepId: 'tool:first', status: 'failed' }]
+  )
+})
+
+test('hides a failed tool card after the same tool succeeds on retry', () => {
+  const parts = [
+    {
+      type: 'tool-call',
+      toolName: 'getMyWorkItems',
+      result: JSON.stringify({
+        success: false,
+        errorCode: 'WORK_ITEM_TARGET_USER_NOT_FOUND',
+      }),
+    },
+    {
+      type: 'tool-call',
+      toolName: 'getMyWorkItems',
+      result: { success: true, result: { count: 0 } },
+    },
+  ]
+
+  assert.deepEqual(visibleToolGroupPositions(parts, [0, 1]), [1])
+})
+
+test('keeps failed tool cards when a different operation succeeds', () => {
+  const parts = [
+    {
+      type: 'tool-call',
+      toolName: 'getMyWorkItems',
+      result: { success: false, errorCode: 'WORK_ITEM_QUERY_FAILED' },
+    },
+    {
+      type: 'tool-call',
+      toolName: 'queryDailyReportStatus',
+      result: { success: true },
+    },
+  ]
+
+  assert.deepEqual(visibleToolGroupPositions(parts, [0, 1]), [0, 1])
 })
 
 function progressLine(

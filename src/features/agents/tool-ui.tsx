@@ -1,5 +1,8 @@
-import { useState, type PropsWithChildren } from 'react'
-import { type ToolCallMessagePartComponent } from '@assistant-ui/react'
+import { Children, useState, type PropsWithChildren } from 'react'
+import {
+  type ToolCallMessagePartComponent,
+  useAuiState,
+} from '@assistant-ui/react'
 import {
   AlertTriangle,
   ChevronRight,
@@ -40,6 +43,7 @@ import {
 } from '@/components/assistant-ui/tool-group'
 import { redirectToOaLogin, type MissingWorkHourItem } from './api'
 import { dailyReportErrorMessage } from './daily-report'
+import { visibleToolGroupPositions } from './tool-retry-data'
 import { parseDailyReportDraftResult } from './tool-ui/daily-report-model'
 import {
   OaDailyReportDraftCard,
@@ -179,13 +183,23 @@ export function AgentToolGroup({
   group,
   children,
 }: PropsWithChildren<{ group: ThreadGroupPart }>) {
+  const messageParts = useAuiState((state) => state.message.parts)
+  const childArray = Children.toArray(children)
+  const visiblePositions = new Set(
+    visibleToolGroupPositions(messageParts, group.indices)
+  )
+  const visibleChildren = childArray.filter((_, index) =>
+    visiblePositions.has(index)
+  )
+  if (visibleChildren.length === 0) return null
+
   return (
     <ToolGroupRoot variant='ghost' defaultOpen>
       <ToolGroupTrigger
-        count={group.indices.length}
+        count={visibleChildren.length}
         active={group.status.type === 'running'}
       />
-      <ToolGroupContent>{children}</ToolGroupContent>
+      <ToolGroupContent>{visibleChildren}</ToolGroupContent>
     </ToolGroupRoot>
   )
 }
