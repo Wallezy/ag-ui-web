@@ -40,13 +40,59 @@ export function parseExecutionProgress(text: string): ExecutionProgressStep[] {
 export function visibleExecutionProgress(
   steps: ExecutionProgressStep[]
 ): ExecutionProgressStep[] {
-  return steps.filter(
-    (step) =>
+  const recoveredAttempts = recoveredToolAttempts(steps)
+  return steps.filter((step) => {
+    const attemptId = toolAttemptId(step.stepId)
+    if (
+      step.status === 'failed' &&
+      attemptId &&
+      recoveredAttempts.has(attemptId)
+    ) {
+      return false
+    }
+    return (
       step.phase === 'tool' ||
       step.status === 'failed' ||
       step.status === 'waiting_user' ||
       step.status === 'waiting_confirmation'
+    )
+  })
+}
+
+function recoveredToolAttempts(steps: ExecutionProgressStep[]) {
+  const completedTools = steps.filter(
+    (step) => step.phase === 'tool' && step.status === 'completed'
   )
+  const recovered = new Set<string>()
+
+  for (const step of steps) {
+    if (step.phase !== 'tool' || step.status !== 'failed') continue
+    const attemptId = toolAttemptId(step.stepId)
+    if (!attemptId) continue
+    const operation = toolOperation(step.title)
+    if (
+      completedTools.some(
+        (candidate) =>
+          candidate.sequence > step.sequence &&
+          toolOperation(candidate.title) === operation
+      )
+    ) {
+      recovered.add(attemptId)
+    }
+  }
+  return recovered
+}
+
+function toolAttemptId(stepId: string) {
+  if (stepId.startsWith('tool:')) return stepId.slice('tool:'.length)
+  if (stepId.startsWith('observation:')) {
+    return stepId.slice('observation:'.length)
+  }
+  return ''
+}
+
+function toolOperation(title: string) {
+  return title.replace(/(?:失败|已完成)$/, '').trim()
 }
 
 function parseUpdate(line: string): ExecutionProgressUpdate | null {
