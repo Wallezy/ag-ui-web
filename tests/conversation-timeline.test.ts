@@ -25,6 +25,18 @@ test('restores a persisted RUN_ERROR as a visible assistant error', () => {
       event: { type: 'RUN_STARTED' },
     },
     {
+      id: 'text-start-1',
+      kind: 'agui_event',
+      timestamp: 2_100,
+      event: { type: 'TEXT_MESSAGE_START', messageId: 'assistant-message-1' },
+    },
+    {
+      id: 'text-end-1',
+      kind: 'agui_event',
+      timestamp: 2_200,
+      event: { type: 'TEXT_MESSAGE_END', messageId: 'assistant-message-1' },
+    },
+    {
       id: 'run-error-1',
       kind: 'agui_event',
       timestamp: 3_000,
@@ -34,7 +46,9 @@ test('restores a persisted RUN_ERROR as a visible assistant error', () => {
 
   assert.equal(messages.length, 2)
   assert.equal(messages[1]?.role, 'assistant')
-  assert.deepEqual(messages[1]?.content, [])
+  assert.deepEqual(messages[1]?.content, [
+    { type: 'text', text: '上游服务暂时不可用。' },
+  ])
   assert.deepEqual(messages[1]?.status, {
     type: 'incomplete',
     reason: 'error',
@@ -143,6 +157,23 @@ test('does not leak an empty completed run into the next assistant message', () 
   )
   assert.equal(messages[2]?.id, 'assistant-message-2')
   assert.equal(messages[2]?.createdAt.getTime(), 5_000)
+})
+
+test('drops an empty text lifecycle from a completed run', () => {
+  const messages = timelineToThreadMessages([
+    aguiEntry('run-start', 1_000, { type: 'RUN_STARTED' }),
+    aguiEntry('text-start', 1_100, {
+      type: 'TEXT_MESSAGE_START',
+      messageId: 'empty-message',
+    }),
+    aguiEntry('text-end', 1_200, {
+      type: 'TEXT_MESSAGE_END',
+      messageId: 'empty-message',
+    }),
+    aguiEntry('run-finished', 1_300, { type: 'RUN_FINISHED' }),
+  ])
+
+  assert.deepEqual(messages, [])
 })
 
 test('restores structured execution progress before tools and response text', () => {

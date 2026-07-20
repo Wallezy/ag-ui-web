@@ -723,6 +723,9 @@ export function timelineToThreadMessages(
     const current = assistant
     assistant = undefined
     const content = assistantContent(current)
+    if (current.error && !hasAssistantText(content)) {
+      content.push({ type: 'text', text: current.error })
+    }
     if (content.length === 0 && !current.error) return
     messages.push(toAssistantMessage(current, content))
   }
@@ -946,7 +949,6 @@ function startTextMessage(assistant: MutableAssistant, messageId?: string) {
   const key = messageId || generateTextKey(assistant)
   ensureTextPart(assistant, key)
   assistant.activeTextMessageId = key
-  markTextPartTouched(assistant, key)
 }
 
 function endTextMessage(assistant: MutableAssistant, messageId?: string) {
@@ -974,11 +976,6 @@ function ensureTextPart(assistant: MutableAssistant, key: string) {
   if (assistant.textParts.has(key)) return
   assistant.textParts.set(key, { buffer: '', touched: false })
   assistant.partOrder.push({ kind: 'text', key })
-}
-
-function markTextPartTouched(assistant: MutableAssistant, key: string) {
-  const entry = assistant.textParts.get(key)
-  if (entry) entry.touched = true
 }
 
 function appendText(
@@ -1094,7 +1091,7 @@ function assistantContent(assistant: MutableAssistant) {
   for (const part of assistant.partOrder) {
     if (part.kind === 'text') {
       const entry = assistant.textParts.get(part.key)
-      if (entry?.touched) {
+      if (entry?.touched && entry.buffer.trim()) {
         content.push({ type: 'text', text: entry.buffer })
       }
       continue
@@ -1102,7 +1099,7 @@ function assistantContent(assistant: MutableAssistant) {
 
     if (part.kind === 'reasoning') {
       const entry = assistant.reasoningParts.get(part.key)
-      if (entry?.touched) {
+      if (entry?.touched && entry.buffer.trim()) {
         content.push({ type: 'reasoning', text: entry.buffer })
       }
       continue
@@ -1125,6 +1122,10 @@ function assistantContent(assistant: MutableAssistant) {
   }
 
   return content
+}
+
+function hasAssistantText(content: ThreadAssistantMessagePart[]) {
+  return content.some((part) => part.type === 'text' && part.text.trim())
 }
 
 function toUserMessage(message: StoredChatMessage): ThreadMessage {
