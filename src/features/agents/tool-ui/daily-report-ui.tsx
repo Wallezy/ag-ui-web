@@ -148,6 +148,7 @@ export function OaDailyReportDraftCard({
     submitted: hasSubmitted,
     hasUnsavedChanges,
   })
+  const canEditPersistedReport = reportPersisted && !hasSubmitted
   const missingOverdueReasonCount = hasSubmitted
     ? 0
     : draft.overdueReasonItems.filter(
@@ -314,6 +315,9 @@ export function OaDailyReportDraftCard({
     report.sections,
     draft.overdueReasonItems
   )
+  const unmatchedPendingOverdueReasonItems = pendingOverdueReasonItems.filter(
+    (item) => !overdueMatches.matchedKeys.has(item.key)
+  )
   const statusText = reportPersisted
     ? '已提交'
     : hasValidationProblem
@@ -406,12 +410,16 @@ export function OaDailyReportDraftCard({
               <CardDescription className='mt-1'>
                 {isDetailView
                   ? reportPersisted
-                    ? '日报已提交到 OA，修改工作总结后可以再次保存。'
+                    ? canEditPersistedReport
+                      ? '日报已提交到 OA，修改工作总结后可以再次保存。'
+                      : '日报已同步到 OA。'
                     : '内容已有修改，保存后将同步到 OA。'
                   : reportPersisted
                     ? hasSubmitted && isUpdate
                       ? `${draft.workDate ? `${draft.workDate} 的` : ''}日报修改已同步到 OA。`
-                      : '无需重新再提交，是否需要修改。'
+                      : hasSubmitted
+                        ? `${draft.workDate ? `${draft.workDate} 的` : ''}日报已同步到 OA。`
+                        : '无需重新再提交，是否需要修改。'
                     : hasValidationProblem
                       ? isUpdate
                         ? '请完成必填项，补齐后即可保存。'
@@ -428,7 +436,7 @@ export function OaDailyReportDraftCard({
               </CardDescription>
             </div>
             <CardAction className='flex items-center gap-1'>
-              {reportPersisted && !isExpanded ? (
+              {canEditPersistedReport && !isExpanded ? (
                 <Button
                   type='button'
                   size='sm'
@@ -558,17 +566,18 @@ export function OaDailyReportDraftCard({
               </label>
             </div>
 
-            {pendingOverdueReasonItems.length ? (
+            {unmatchedPendingOverdueReasonItems.length ? (
               <div className='border-destructive/30 bg-destructive/5 rounded-md border px-3 py-3 text-sm'>
                 <div className='text-destructive flex items-center gap-2 font-medium'>
                   <AlertTriangle className='size-4' />
-                  还需填写 {pendingOverdueReasonItems.length} 项逾期原因
+                  还需填写 {unmatchedPendingOverdueReasonItems.length}{' '}
+                  项逾期原因
                 </div>
                 <div className='text-destructive mt-1 text-xs'>
-                  补充完成后即可确认提交
+                  这些项目未能定位到上方明细，请在这里补充
                 </div>
                 <div className='mt-3 flex flex-col gap-3'>
-                  {pendingOverdueReasonItems.map((item) => (
+                  {unmatchedPendingOverdueReasonItems.map((item) => (
                     <OverdueReasonInput
                       key={item.key}
                       item={item}
