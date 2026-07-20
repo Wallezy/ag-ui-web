@@ -100,6 +100,7 @@ type DailyReportConfirmationRequest = {
   draftVersion?: number
   idempotencyKey?: string
   confirmedContent?: string
+  aiAbstract?: string
   overdueReasons?: Record<string, string>
   confirmationContext?: Record<string, unknown>
 }
@@ -134,6 +135,17 @@ export type DailyReportDraftStatusResponse = {
 export type PrepareDailyReportResponse = {
   status: 'DRAFT_READY' | 'MISSING_WORK_HOURS' | 'UNKNOWN' | 'FAILED'
   success: boolean
+  message?: string
+  errorCode?: string
+  auditId?: string
+  details?: Record<string, unknown>
+  result?: Record<string, unknown>
+}
+
+export type DailyReportAiAbstractResponse = {
+  status?: string
+  success: boolean
+  aiAbstract?: string
   message?: string
   errorCode?: string
   auditId?: string
@@ -414,6 +426,22 @@ export async function prepareDailyReport(payload: {
 }) {
   return request<PrepareDailyReportResponse>(
     '/api/agent/oa/daily-reports/prepare',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }
+  )
+}
+
+export async function generateDailyReportAiAbstract(payload: {
+  draftId: string
+  draftVersion?: number
+  confirmedContent?: string
+  overdueReasons?: Record<string, string>
+  confirmationContext?: Record<string, unknown>
+}) {
+  return request<DailyReportAiAbstractResponse>(
+    '/api/agent/oa/daily-reports/ai-abstract',
     {
       method: 'POST',
       body: JSON.stringify(payload),
