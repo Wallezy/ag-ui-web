@@ -50,12 +50,7 @@ export function visibleExecutionProgress(
     ) {
       return false
     }
-    return (
-      step.phase === 'tool' ||
-      step.status === 'failed' ||
-      step.status === 'waiting_user' ||
-      step.status === 'waiting_confirmation'
-    )
+    return true
   })
 }
 

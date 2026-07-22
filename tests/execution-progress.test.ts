@@ -83,7 +83,7 @@ test('accepts planning, observation, and user waiting terminal states', () => {
   )
 })
 
-test('shows real actions and user handoffs instead of internal planning narration', () => {
+test('shows the complete safe decision and execution trace', () => {
   const steps = visibleExecutionProgress(
     parseExecutionProgress(
       [
@@ -136,8 +136,12 @@ test('shows real actions and user handoffs instead of internal planning narratio
   assert.deepEqual(
     steps.map(({ stepId, title }) => ({ stepId, title })),
     [
+      { stepId: 'understanding', title: '已完成初步意图识别' },
+      { stepId: 'planning', title: '执行计划已确定' },
       { stepId: 'tool:1', title: '日报数据已检查' },
+      { stepId: 'observation:1', title: '已观察业务结果' },
       { stepId: 'outcome', title: '可登记工时事项已就绪' },
+      { stepId: 'response', title: '处理完成' },
     ]
   )
 })
@@ -180,7 +184,10 @@ test('hides a failed tool attempt after the same operation succeeds on retry', (
 
   assert.deepEqual(
     steps.map(({ stepId, status }) => ({ stepId, status })),
-    [{ stepId: 'tool:retry', status: 'completed' }]
+    [
+      { stepId: 'tool:retry', status: 'completed' },
+      { stepId: 'response', status: 'completed' },
+    ]
   )
 })
 
@@ -208,7 +215,10 @@ test('keeps a failed tool attempt when no later retry succeeds', () => {
 
   assert.deepEqual(
     steps.map(({ stepId, status }) => ({ stepId, status })),
-    [{ stepId: 'tool:first', status: 'failed' }]
+    [
+      { stepId: 'tool:first', status: 'failed' },
+      { stepId: 'response', status: 'completed' },
+    ]
   )
 })
 

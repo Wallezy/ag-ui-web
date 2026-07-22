@@ -29,15 +29,19 @@ export const AgentExecutionProgress: ReasoningMessagePartComponent = ({
   )
   const hasFailed = steps.some((step) => step.status === 'failed')
   const label = isRunning
-    ? '正在处理'
+    ? '决策与执行中'
     : isWaiting
       ? '等待你的操作'
       : hasFailed
-        ? '处理未完成'
-        : '已执行'
+        ? '执行与决策未完成'
+        : '执行与决策已结束'
 
   return (
-    <section className='my-2' aria-label='业务处理进展' aria-live='polite'>
+    <section
+      className='my-2'
+      aria-label='智能体执行与决策轨迹'
+      aria-live='polite'
+    >
       <div className='text-muted-foreground flex min-h-6 items-center gap-2 text-xs font-medium'>
         {isRunning ? (
           <LoaderCircle className='size-3.5 animate-spin' />
@@ -64,7 +68,7 @@ export const AgentExecutionProgress: ReasoningMessagePartComponent = ({
               >
                 {step.title}
               </div>
-              {step.detail && step.status !== 'completed' ? (
+              {step.detail ? (
                 <div className='text-muted-foreground text-xs leading-4'>
                   {step.detail}
                 </div>

@@ -728,7 +728,7 @@ function statusLabel(status: string) {
     case 'running':
       return '运行中'
     case 'completed':
-      return '已完成'
+      return '已结束'
     case 'waiting_auth':
       return '等待授权'
     case 'waiting_action':
