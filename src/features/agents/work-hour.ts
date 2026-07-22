@@ -166,7 +166,7 @@ export function highWorkHourConfirmation(
   }
 }
 
-export function workHourErrorCode(error: unknown) {
+function workHourErrorCode(error: unknown) {
   if (error instanceof ApiRequestError) return error.code ?? ''
   if (isRecord(error)) {
     if (typeof error.errorCode === 'string') return error.errorCode
@@ -213,6 +213,9 @@ export function workHourErrorMessage(
   }
   if (code.includes('ALREADY_SUBMITTED')) {
     return '这条工时已经提交，无需重复保存。'
+  }
+  if (code.includes('SOURCE_CHANGED')) {
+    return '这条工时已在 OA 中发生变化，请刷新表单后重新确认。'
   }
   if (code.includes('ATTENDANCE_MISSING')) {
     return '该日期没有有效考勤记录，暂时不能登记工时。'

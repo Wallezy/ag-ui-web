@@ -59,6 +59,7 @@ test('loads the complete work-hour form through one Agent BFF request', async ()
       projectBases: [],
       designs: [],
       idempotencyKey: 'intent-1',
+      sourceFingerprint: 'wh-exec-v1:form-source',
       allowedWorkDates: ['2026-07-15', '2026-07-14'],
     })
   }
@@ -77,6 +78,7 @@ test('loads the complete work-hour form through one Agent BFF request', async ()
       '2026-07-15',
       '2026-07-14',
     ])
+    assert.equal(result.sourceFingerprint, 'wh-exec-v1:form-source')
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -163,6 +165,7 @@ test('refreshes an invalid intent and retries the rejected write only once', asy
         type: 'task',
         workItemId: 'task-1',
         workDate: '2026-07-15',
+        sourceFingerprint: 'wh-exec-v1:refreshed-source',
         idempotencyKey: 'intent-refreshed',
       })
     }
@@ -191,12 +194,76 @@ test('refreshes an invalid intent and retries the rejected write only once', asy
     assert.equal(result.status, 'ACCEPTED')
     assert.equal(saveAttempts, 2)
     assert.equal(calls.length, 3)
-    assert.equal(JSON.parse(calls[1].body ?? '{}').executionId, 'execution-1')
+    const initialSaveBody = JSON.parse(calls[0].body ?? '{}') as Record<
+      string,
+      unknown
+    >
+    const refreshBody = JSON.parse(calls[1].body ?? '{}') as Record<
+      string,
+      unknown
+    >
+    const retriedSaveBody = JSON.parse(calls[2].body ?? '{}') as Record<
+      string,
+      unknown
+    >
+    assert.equal(initialSaveBody.sourceFingerprint, 'wh-exec-v1:original-source')
+    assert.equal(refreshBody.executionId, 'execution-1')
     assert.equal(
-      JSON.parse(calls[1].body ?? '{}').originalWorkDate,
+      refreshBody.originalWorkDate,
       '2026-07-14'
     )
-    assert.equal(JSON.parse(calls[2].body ?? '{}').idempotencyKey, 'intent-refreshed')
+    assert.equal(refreshBody.sourceFingerprint, 'wh-exec-v1:original-source')
+    assert.equal(retriedSaveBody.idempotencyKey, 'intent-refreshed')
+    assert.equal(
+      retriedSaveBody.sourceFingerprint,
+      'wh-exec-v1:refreshed-source'
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('keeps the form source fingerprint when intent refresh does not replace it', async () => {
+  const originalFetch = globalThis.fetch
+  const saveBodies: Record<string, unknown>[] = []
+  let saveAttempts = 0
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith('/intents')) {
+      return jsonResponse({
+        type: 'task',
+        workItemId: 'task-1',
+        workDate: '2026-07-15',
+        idempotencyKey: 'intent-refreshed',
+      })
+    }
+
+    saveBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+    saveAttempts += 1
+    if (saveAttempts === 1) {
+      return jsonResponse(
+        {
+          status: 'REJECTED',
+          errorCode: 'WORK_HOUR_INTENT_INVALID',
+          message: '工时保存意图无效',
+        },
+        400
+      )
+    }
+    return jsonResponse({ status: 'ACCEPTED', message: '保存成功' })
+  }
+
+  try {
+    await saveWorkHourExecutionWithIntentRefresh(
+      savePayload(),
+      'conversation-1'
+    )
+
+    assert.equal(saveBodies.length, 2)
+    assert.equal(
+      saveBodies[1].sourceFingerprint,
+      'wh-exec-v1:original-source'
+    )
+    assert.equal(saveBodies[1].idempotencyKey, 'intent-refreshed')
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -251,6 +318,7 @@ function savePayload(): SaveWorkHourExecutionRequest {
     workItemId: 'task-1',
     executionId: 'execution-1',
     originalWorkDate: '2026-07-14',
+    sourceFingerprint: 'wh-exec-v1:original-source',
     workDate: '2026-07-15',
     workCategory: '开发',
     workHour: 1,

@@ -1,4 +1,4 @@
-export type WorkItemQueryStatus = 'COMPLETE' | 'PARTIAL' | 'FAILED'
+type WorkItemQueryStatus = 'COMPLETE' | 'PARTIAL' | 'FAILED'
 
 export type WorkItemQueryError = {
   type?: string
@@ -32,7 +32,7 @@ export type WorkItemsResult = {
   completeness: WorkItemQueryCompleteness
 }
 
-export type WorkItemQueryPresentation = {
+type WorkItemQueryPresentation = {
   title: string
   badge: string
   description: string

@@ -2,10 +2,44 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { ApiRequestError } from '../src/features/agents/api-error.ts'
 import {
+  dailyReportAbstractForSubmission,
   dailyReportErrorMessage,
   dailyReportOperationCopy,
   dailyReportOperationMode,
 } from '../src/features/agents/daily-report.ts'
+
+test('continues submission with a successful fallback abstract', () => {
+  assert.equal(
+    dailyReportAbstractForSubmission({
+      success: true,
+      aiAbstract: '  deterministic summary  ',
+      result: { generatedBy: 'fallback', aiFallback: true },
+    }),
+    'deterministic summary'
+  )
+  assert.equal(
+    dailyReportAbstractForSubmission({
+      success: true,
+      result: {
+        aiAbstract: 'nested fallback summary',
+        generatedBy: 'fallback',
+        aiFallback: true,
+      },
+    }),
+    'nested fallback summary'
+  )
+})
+
+test('does not submit without a successful non-empty abstract', () => {
+  assert.equal(
+    dailyReportAbstractForSubmission({
+      success: false,
+      aiAbstract: 'must not be submitted',
+    }),
+    ''
+  )
+  assert.equal(dailyReportAbstractForSubmission({ success: true }), '')
+})
 
 test('recognizes an existing OA report as update mode', () => {
   assert.equal(dailyReportOperationMode('update'), 'update')

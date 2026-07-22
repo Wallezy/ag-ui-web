@@ -203,6 +203,7 @@ test('provides stable copy for the main work-hour failure categories', () => {
   const cases = [
     ['WORK_HOUR_DATE_LOCKED', '这条工时的登记日期不能修改，请保留原日期。'],
     ['WORK_HOUR_DUPLICATE', '该日期已有工时记录，请刷新表单后进行修改。'],
+    ['WORK_HOUR_SOURCE_CHANGED', '这条工时已在 OA 中发生变化，请刷新表单后重新确认。'],
     ['WORK_HOUR_FORBIDDEN', '你当前不能登记或编辑这条工时，请重新打开表单；仍有问题请联系项目负责人。'],
     ['WORK_ITEM_NOT_EXECUTABLE', '该工作项当前不可登记工时，可能已完成、取消或所属项目已归档。'],
     ['WORK_HOUR_ATTENDANCE_MISSING', '该日期没有有效考勤记录，暂时不能登记工时。'],

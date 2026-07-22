@@ -24,10 +24,10 @@ export function dailyReportOperationCopy(mode: DailyReportOperationMode) {
   }
 }
 
-type DailyReportFailure = {
-  errorCode?: string
-  code?: string
-  message?: string
+type DailyReportAbstractResponse = {
+  success?: boolean
+  aiAbstract?: unknown
+  result?: unknown
 }
 
 export function dailyReportOperationMode(
@@ -35,6 +35,17 @@ export function dailyReportOperationMode(
   existingReport = false
 ): DailyReportOperationMode {
   return value === 'update' || existingReport ? 'update' : 'create'
+}
+
+export function dailyReportAbstractForSubmission(
+  response: DailyReportAbstractResponse
+) {
+  if (!response.success) return ''
+
+  const direct = textValue(response.aiAbstract)
+  if (direct) return direct
+  if (!isRecord(response.result)) return ''
+  return textValue(response.result.aiAbstract)
 }
 
 export function dailyReportErrorMessage(
@@ -110,6 +121,10 @@ function containsInternalCode(message: string) {
   return /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/.test(message)
 }
 
-function isRecord(value: unknown): value is DailyReportFailure {
+function textValue(value: unknown) {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }

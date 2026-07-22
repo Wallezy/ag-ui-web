@@ -15,7 +15,7 @@ export type ExecutionProgressUpdate = {
   sequence: number
 }
 
-export type ExecutionProgressStep = ExecutionProgressUpdate & {
+type ExecutionProgressStep = ExecutionProgressUpdate & {
   firstSequence: number
 }
 

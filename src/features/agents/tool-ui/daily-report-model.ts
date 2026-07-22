@@ -778,7 +778,8 @@ function readTotalRegisteredWorkHours(result: Record<string, unknown>) {
     'registeredWorkHours',
     'totalWorkHours'
   )
-  const direct = directValue === undefined ? undefined : numberValue(directValue)
+  const direct =
+    directValue === undefined ? undefined : numberValue(directValue)
   if (direct !== undefined) return direct
 
   if (isRecord(result.workHourStats)) {
@@ -788,8 +789,7 @@ function readTotalRegisteredWorkHours(result: Record<string, unknown>) {
       'total',
       'registered'
     )
-    const stats =
-      statsValue === undefined ? undefined : numberValue(statsValue)
+    const stats = statsValue === undefined ? undefined : numberValue(statsValue)
     if (stats !== undefined) return stats
   }
 

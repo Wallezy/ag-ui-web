@@ -476,7 +476,7 @@ function WorkHourFillListItem({
   )
 }
 
-export function WorkHourFillSheet({
+function WorkHourFillSheet({
   items,
   workDate,
   confirmationContext,
@@ -647,6 +647,7 @@ export function WorkHourFillSheet({
             options.originalWorkDate ||
             selectedItem.workDate ||
             options.workDate,
+          sourceFingerprint: options.sourceFingerprint,
           workDate: form.workDate,
           workCategory: form.workCategory,
           workHour: Number(form.workHour),

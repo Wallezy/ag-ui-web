@@ -35,6 +35,7 @@ import {
   type DailyReportDraftStatusResponse,
 } from '../api'
 import {
+  dailyReportAbstractForSubmission,
   dailyReportErrorMessage,
   dailyReportOperationCopy,
 } from '../daily-report'
@@ -103,12 +104,15 @@ export function OaDailyReportDraftCard({
     initialOverdueReasons(draft.overdueReasonItems, draft.overdueReasons)
   )
   const [savedRemark] = useState(() => draft.remark || '')
+  const conversationId =
+    readText(draft.confirmationContext?.sessionId) ||
+    readText(draft.confirmationContext?.threadId)
 
   useEffect(() => {
-    if (!draft.draftId) return
+    if (!draft.draftId || !conversationId) return
 
     let cancelled = false
-    getDailyReportDraftStatus(draft.draftId)
+    getDailyReportDraftStatus(draft.draftId, conversationId)
       .then((status) => {
         if (cancelled) return
         setServerDraft(status)
@@ -130,7 +134,7 @@ export function OaDailyReportDraftCard({
     return () => {
       cancelled = true
     }
-  }, [draft.draftId, draft.overdueReasonItems, isDetailView])
+  }, [conversationId, draft.draftId, draft.overdueReasonItems, isDetailView])
   const hasSubmitted =
     submitState === 'success' ||
     draft.submitted ||
@@ -201,11 +205,8 @@ export function OaDailyReportDraftCard({
         overdueReasons: confirmedOverdueReasons,
         confirmationContext: draft.confirmationContext,
       })
-      const aiAbstract =
-        readText(abstractResponse.aiAbstract)?.trim() ||
-        readText(abstractResponse.result?.aiAbstract)?.trim() ||
-        ''
-      if (!abstractResponse.success || !aiAbstract) {
+      const aiAbstract = dailyReportAbstractForSubmission(abstractResponse)
+      if (!aiAbstract) {
         setSubmitState('error')
         setSubmitError(
           dailyReportErrorMessage(

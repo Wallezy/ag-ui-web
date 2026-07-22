@@ -105,7 +105,7 @@ type DailyReportConfirmationRequest = {
   confirmationContext?: Record<string, unknown>
 }
 
-export type DailyReportConfirmationResponse = {
+type DailyReportConfirmationResponse = {
   status: string
   toolName?: string
   draftId?: string
@@ -132,7 +132,7 @@ export type DailyReportDraftStatusResponse = {
   message?: string
 }
 
-export type PrepareDailyReportResponse = {
+type PrepareDailyReportResponse = {
   status: 'DRAFT_READY' | 'MISSING_WORK_HOURS' | 'UNKNOWN' | 'FAILED'
   success: boolean
   message?: string
@@ -142,7 +142,7 @@ export type PrepareDailyReportResponse = {
   result?: Record<string, unknown>
 }
 
-export type DailyReportAiAbstractResponse = {
+type DailyReportAiAbstractResponse = {
   status?: string
   success: boolean
   aiAbstract?: string
@@ -150,7 +150,11 @@ export type DailyReportAiAbstractResponse = {
   errorCode?: string
   auditId?: string
   details?: Record<string, unknown>
-  result?: Record<string, unknown>
+  result?: Record<string, unknown> & {
+    aiAbstract?: string
+    generatedBy?: 'ai' | 'fallback'
+    aiFallback?: boolean
+  }
 }
 
 export type MissingWorkHourItem = {
@@ -231,6 +235,7 @@ export type WorkHourOptionsResponse = {
   supplementalWorkDates?: string[]
   workDateOptions?: WorkHourDateOption[]
   originalWorkDate?: string
+  sourceFingerprint?: string
   retainedWorkDate?: string
   dateEditable?: boolean
   retainedExistingDateAllowed?: boolean
@@ -243,6 +248,7 @@ export type SaveWorkHourExecutionRequest = {
   workItemId: string
   executionId?: string
   originalWorkDate?: string
+  sourceFingerprint?: string
   workDate: string
   workCategory: string
   workHour: number
@@ -255,7 +261,7 @@ export type SaveWorkHourExecutionRequest = {
   confirmationContext?: Record<string, unknown>
 }
 
-export type SaveWorkHourExecutionResponse = {
+type SaveWorkHourExecutionResponse = {
   status: string
   toolName?: string
   auditId?: string
@@ -412,9 +418,13 @@ export async function confirmDailyReport(
   })
 }
 
-export async function getDailyReportDraftStatus(draftId: string) {
+export async function getDailyReportDraftStatus(
+  draftId: string,
+  conversationId: string
+) {
   return request<DailyReportDraftStatusResponse>(
-    `/api/agent/daily-report-drafts/${encodeURIComponent(draftId)}`
+    `/api/agent/daily-report-drafts/${encodeURIComponent(draftId)}` +
+      `?conversationId=${encodeURIComponent(conversationId)}`
   )
 }
 
@@ -476,25 +486,29 @@ export async function getWorkHourOptions(
   return normalizeWorkHourOptions(response)
 }
 
-export async function saveWorkHourExecution(
-  payload: SaveWorkHourExecutionRequest
-) {
+async function saveWorkHourExecution(payload: SaveWorkHourExecutionRequest) {
   return request<SaveWorkHourExecutionResponse>('/api/agent/oa/work-hours', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
 }
 
-export async function refreshWorkHourIntent(
+async function refreshWorkHourIntent(
   payload: Pick<
     SaveWorkHourExecutionRequest,
-    'type' | 'workItemId' | 'executionId' | 'originalWorkDate' | 'workDate'
+    | 'type'
+    | 'workItemId'
+    | 'executionId'
+    | 'originalWorkDate'
+    | 'sourceFingerprint'
+    | 'workDate'
   > & { conversationId: string }
 ) {
   return request<{
     type: 'task' | 'bug'
     workItemId: string
     workDate: string
+    sourceFingerprint?: string
     idempotencyKey: string
   }>('/api/agent/oa/work-hours/intents', {
     method: 'POST',
@@ -525,11 +539,13 @@ export async function saveWorkHourExecutionWithIntentRefresh(
     workItemId: payload.workItemId,
     executionId: payload.executionId,
     originalWorkDate: payload.originalWorkDate,
+    sourceFingerprint: payload.sourceFingerprint,
     workDate: payload.workDate,
     conversationId,
   })
   return saveWorkHourExecution({
     ...payload,
+    sourceFingerprint: intent.sourceFingerprint ?? payload.sourceFingerprint,
     idempotencyKey: intent.idempotencyKey,
   })
 }
