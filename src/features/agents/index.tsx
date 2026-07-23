@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { HttpAgent } from '@ag-ui/client'
 import {
   AssistantRuntimeProvider,
   type ThreadHistoryAdapter,
@@ -60,6 +59,7 @@ import {
   AgentExecutionProgress,
   AgentExecutionProgressGroup,
 } from './execution-progress'
+import { RuntimeHttpAgent } from './runtime-http-agent'
 import { AgentToolFallback, AgentToolGroup } from './tool-ui'
 import type { AgentId, ConversationSummary } from './types'
 
@@ -527,7 +527,7 @@ function AgentThread({
 }) {
   const agent = useMemo(
     () =>
-      new HttpAgent({
+      new RuntimeHttpAgent({
         url: AGUI_RUN_URL,
         agentId: activeAgent.backendAgentId,
         threadId: conversationId,
