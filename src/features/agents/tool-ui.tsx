@@ -5,7 +5,6 @@ import {
 } from '@assistant-ui/react'
 import {
   AlertTriangle,
-  ChevronRight,
   CheckCircle2,
   ClipboardList,
   Clock3,
@@ -17,7 +16,6 @@ import {
   XCircle,
   type LucideIcon,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,14 +26,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { ThreadGroupPart } from '@/components/assistant-ui/thread'
-import { ToolFallback } from '@/components/assistant-ui/tool-fallback'
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -49,17 +41,22 @@ import {
   OaDailyReportDraftCard,
   OaDailyReportStatusCard,
 } from './tool-ui/daily-report-ui'
-import { IconFrame, OaMetric } from './tool-ui/primitives'
+import { IconFrame } from './tool-ui/primitives'
+import { isRecord, parseJson, readBoolean, readString } from './tool-ui/shared'
 import {
-  formatDisplayValue,
-  isRecord,
-  parseJson,
-  readBoolean,
-  readString,
-} from './tool-ui/shared'
+  oaToolNames,
+  parseOaToolResult,
+  publicToolMessage,
+  safeToolFallbackPresentation,
+  weatherToolNames,
+  type OaToolResult,
+  type SafeToolFallbackPresentation,
+} from './tool-ui/tool-presentation'
 import { parseWeatherResult, readLocation } from './tool-ui/weather-data'
 import { WeatherToolCard, WeatherToolLoadingCard } from './tool-ui/weather-ui'
 import { readMissingWorkHourItems } from './tool-ui/work-hour-data'
+import { parseUserWorkHoursResult } from './tool-ui/work-hour-query-data'
+import { OaUserWorkHoursCard } from './tool-ui/work-hour-query-ui'
 import { WorkHourFillActionCard } from './tool-ui/work-hour-ui'
 import { OaWorkItemDetailCard, OaWorkItemsCard } from './tool-ui/work-items-ui'
 import { workHourErrorMessage } from './work-hour'
@@ -67,15 +64,6 @@ import { parseWorkItemsResult } from './work-items-result'
 
 type OaLoginRequiredResult = {
   message: string
-}
-
-type OaToolResult = {
-  toolName: string
-  success?: boolean
-  message?: string
-  errorCode?: string
-  auditId?: string
-  result?: Record<string, unknown>
 }
 
 type WorkHourFillActionResult = {
@@ -119,16 +107,6 @@ function WorkHourFillResultCard({
   )
 }
 
-const weatherToolNames = new Set(['get-weather', 'weatherTool'])
-const oaToolNames = new Set([
-  'getMyWorkItems',
-  'getWorkItemDetail',
-  'generateDailyReportDraft',
-  'getActiveDailyReportDraft',
-  'prepareWorkHourFill',
-  'queryDailyReportStatus',
-  'submitDailyReport',
-])
 const OA_LOGIN_REQUIRED = 'OA_LOGIN_REQUIRED'
 
 const oaToolCopy: Record<
@@ -140,6 +118,12 @@ const oaToolCopy: Record<
     running: '正在按成员、项目和日期读取有权查看的任务与缺陷。',
     badge: 'Work Items',
     icon: ClipboardList,
+  },
+  getUserWorkHours: {
+    title: '查询登记工时',
+    running: '正在按成员和日期汇总已登记工时。',
+    badge: 'Work Hours',
+    icon: Clock3,
   },
   getWorkItemDetail: {
     title: '查询工作项详情',
@@ -162,6 +146,12 @@ const oaToolCopy: Record<
   prepareWorkHourFill: {
     title: '填工时',
     running: '正在读取可填工时的任务和缺陷。',
+    badge: 'Work Hours',
+    icon: Clock3,
+  },
+  saveWorkHourExecution: {
+    title: '保存登记工时',
+    running: '正在保存已确认的工时。',
     badge: 'Work Hours',
     icon: Clock3,
   },
@@ -220,11 +210,11 @@ export const AgentToolFallback: ToolCallMessagePartComponent = (props) => {
       return <OaToolLoadingCard toolName={props.toolName} />
     }
 
-    return <ToolFallback {...props} />
+    return <SafeToolStatus presentation={safeToolFallbackPresentation(props)} />
   }
 
   if (!weatherToolNames.has(props.toolName)) {
-    return <ToolFallback {...props} />
+    return <SafeToolStatus presentation={safeToolFallbackPresentation(props)} />
   }
 
   const result = parseWeatherResult(props.result)
@@ -234,7 +224,7 @@ export const AgentToolFallback: ToolCallMessagePartComponent = (props) => {
       return <WeatherToolLoadingCard location={readLocation(props.args)} />
     }
 
-    return <ToolFallback {...props} />
+    return <SafeToolStatus presentation={safeToolFallbackPresentation(props)} />
   }
 
   return <WeatherToolCard weather={result} />
@@ -250,6 +240,13 @@ function OaToolResultCard({ result }: { result: OaToolResult }) {
 
   if (result.success === false || result.errorCode) {
     return <OaErrorCard result={result} />
+  }
+
+  if (result.toolName === 'getUserWorkHours') {
+    const workHours = parseUserWorkHoursResult(result.result)
+    if (workHours) {
+      return <OaUserWorkHoursCard result={workHours} message={result.message} />
+    }
   }
 
   if (
@@ -298,26 +295,16 @@ function OaToolResultCard({ result }: { result: OaToolResult }) {
   }
 
   if (result.toolName === 'submitDailyReport') {
-    return (
-      <OaDailyReportSuccessCard
-        auditId={
-          result.auditId ||
-          (isRecord(result.result)
-            ? readString(result.result.auditId)
-            : undefined)
-        }
-      />
-    )
+    return <OaDailyReportSuccessCard />
   }
 
   const copy = oaToolCopy[result.toolName]
   return (
     <OaGenericResultCard
       icon={copy?.icon ?? ClipboardList}
-      title={copy?.title ?? 'OA 工具结果'}
+      title={copy?.title ?? '业务操作结果'}
       badge={copy?.badge ?? 'OA'}
-      message={result.message || 'OA 工具已返回结果'}
-      result={result.result}
+      message={result.message || '业务系统已返回结果。'}
     />
   )
 }
@@ -327,20 +314,14 @@ function OaGenericResultCard({
   title,
   badge,
   message,
-  result,
   tone = 'default',
 }: {
   icon: LucideIcon
   title: string
   badge: string
   message: string
-  result?: Record<string, unknown>
   tone?: 'default' | 'success'
 }) {
-  const entries = Object.entries(result ?? {})
-    .filter(([, value]) => value !== undefined && value !== null)
-    .slice(0, 6)
-
   return (
     <Card className='w-full max-w-2xl gap-4 rounded-lg py-4 shadow-none'>
       <CardHeader className='gap-3 px-4 sm:px-5'>
@@ -358,66 +339,23 @@ function OaGenericResultCard({
           </CardAction>
         </div>
       </CardHeader>
-      {entries.length ? (
-        <CardContent className='grid gap-2 px-4 sm:grid-cols-2 sm:px-5'>
-          {entries.map(([key, value]) => (
-            <OaMetric key={key} label={key} value={formatDisplayValue(value)} />
-          ))}
-        </CardContent>
-      ) : null}
     </Card>
   )
 }
 
-function OaDailyReportSuccessCard({ auditId }: { auditId?: string }) {
-  const [isExpanded, setIsExpanded] = useState(false)
-
+function OaDailyReportSuccessCard() {
   return (
-    <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
-      <Card className='w-full max-w-2xl gap-0 overflow-hidden rounded-lg py-0 shadow-none'>
-        <CardHeader
-          className={cn('px-4 py-4 sm:px-5', isExpanded && 'border-b')}
-        >
-          <div className='flex items-start gap-3'>
-            <IconFrame icon={CheckCircle2} tone='success' />
-            <div className='min-w-0 flex-1'>
-              <CardTitle className='text-base'>日报提交成功</CardTitle>
-              <CardDescription className='mt-1'>已同步到 OA。</CardDescription>
-            </div>
-            {auditId ? (
-              <CardAction>
-                <CollapsibleTrigger asChild>
-                  <Button
-                    type='button'
-                    size='icon'
-                    variant='ghost'
-                    className='size-8'
-                    aria-label={isExpanded ? '收起提交详情' : '展开提交详情'}
-                    title={isExpanded ? '收起提交详情' : '展开提交详情'}
-                  >
-                    <ChevronRight
-                      className={cn(
-                        'transition-transform duration-200',
-                        isExpanded && 'rotate-90'
-                      )}
-                    />
-                  </Button>
-                </CollapsibleTrigger>
-              </CardAction>
-            ) : null}
+    <Card className='w-full max-w-2xl gap-0 overflow-hidden rounded-lg py-0 shadow-none'>
+      <CardHeader className='px-4 py-4 sm:px-5'>
+        <div className='flex items-start gap-3'>
+          <IconFrame icon={CheckCircle2} tone='success' />
+          <div className='min-w-0 flex-1'>
+            <CardTitle className='text-base'>日报提交成功</CardTitle>
+            <CardDescription className='mt-1'>已同步到 OA。</CardDescription>
           </div>
-        </CardHeader>
-        {auditId ? (
-          <CollapsibleContent className='CollapsibleContent'>
-            <CardContent className='px-4 py-3 sm:px-5'>
-              <div className='text-muted-foreground text-xs break-all'>
-                提交记录：{auditId}
-              </div>
-            </CardContent>
-          </CollapsibleContent>
-        ) : null}
-      </Card>
-    </Collapsible>
+        </div>
+      </CardHeader>
+    </Card>
   )
 }
 
@@ -435,6 +373,7 @@ function OaErrorCard({ result }: { result: OaToolResult }) {
     result.errorCode?.includes('WORK_HOUR') ||
     result.toolName === 'prepareWorkHourFill' ||
     result.toolName === 'saveWorkHourExecution'
+  const isWorkHourQueryError = result.toolName === 'getUserWorkHours'
   const Icon = isWorkItemPermissionError
     ? ShieldAlert
     : isValidationError
@@ -446,9 +385,11 @@ function OaErrorCard({ result }: { result: OaToolResult }) {
       ? '日报校验未通过'
       : isDailyReportError
         ? '日报暂未保存'
-        : isWorkHourError
-          ? '工时未保存'
-          : '暂时无法完成操作'
+        : isWorkHourQueryError
+          ? '暂时无法查询工时'
+          : isWorkHourError
+            ? '工时未保存'
+            : '暂时无法完成操作'
   const message = isWorkItemPermissionError
     ? result.message || '当前账号没有目标项目的工作项查询权限。'
     : isWorkHourError
@@ -470,21 +411,53 @@ function OaErrorCard({ result }: { result: OaToolResult }) {
           </div>
         </div>
       </CardHeader>
-      {result.auditId && !isDailyReportError ? (
-        <CardContent className='px-4 sm:px-5'>
-          <div className='text-muted-foreground rounded-md border px-3 py-2 text-xs'>
-            审计编号：{result.auditId}
-          </div>
-        </CardContent>
-      ) : null}
     </Card>
+  )
+}
+
+function SafeToolStatus({
+  presentation,
+}: {
+  presentation: SafeToolFallbackPresentation
+}) {
+  const Icon =
+    presentation.state === 'running'
+      ? LoaderCircle
+      : presentation.state === 'failed'
+        ? XCircle
+        : presentation.state === 'waiting'
+          ? AlertTriangle
+          : CheckCircle2
+
+  return (
+    <div
+      data-slot='safe-tool-status'
+      className='flex w-full max-w-2xl items-start gap-2 py-1.5 text-sm'
+      role='status'
+    >
+      <Icon
+        className={
+          presentation.state === 'running'
+            ? 'text-muted-foreground mt-0.5 size-4 shrink-0 animate-spin'
+            : presentation.state === 'failed'
+              ? 'text-destructive mt-0.5 size-4 shrink-0'
+              : 'text-muted-foreground mt-0.5 size-4 shrink-0'
+        }
+      />
+      <div className='min-w-0'>
+        <div className='font-medium'>{presentation.title}</div>
+        <div className='text-muted-foreground mt-0.5 text-xs'>
+          {presentation.detail}
+        </div>
+      </div>
+    </div>
   )
 }
 
 function OaToolLoadingCard({ toolName }: { toolName: string }) {
   const copy = oaToolCopy[toolName] ?? {
-    title: '执行 OA 工具',
-    running: '正在等待 OA 工具返回结果。',
+    title: '执行业务操作',
+    running: '正在等待业务系统返回结果。',
     badge: 'OA',
     icon: LoaderCircle,
   }
@@ -551,27 +524,10 @@ function parseOaLoginRequired(
 
   return {
     message:
-      readString(parsed.message) || '当前未登录，正在跳转到现有系统登录页',
-  }
-}
-
-function parseOaToolResult(
-  result: unknown,
-  fallbackToolName: string
-): OaToolResult | undefined {
-  const parsed = typeof result === 'string' ? parseJson(result) : result
-  if (!isRecord(parsed)) return undefined
-
-  const toolName = readString(parsed.toolName) || fallbackToolName
-  if (!oaToolNames.has(toolName)) return undefined
-
-  return {
-    toolName,
-    success: readBoolean(parsed.success),
-    message: readString(parsed.message),
-    errorCode: readString(parsed.errorCode),
-    auditId: readString(parsed.auditId),
-    result: isRecord(parsed.result) ? parsed.result : undefined,
+      publicToolMessage(
+        parsed.message,
+        '当前未登录，正在跳转到现有系统登录页'
+      ) || '当前未登录，正在跳转到现有系统登录页',
   }
 }
 

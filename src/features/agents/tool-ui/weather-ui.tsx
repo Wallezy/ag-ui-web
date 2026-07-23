@@ -32,7 +32,7 @@ export function WeatherToolCard({ weather }: { weather: WeatherResult }) {
               <CardTitle className='truncate text-base'>
                 {weather.location}天气
               </CardTitle>
-              <Badge variant='secondary'>AG-UI 工具结果</Badge>
+              <Badge variant='secondary'>实时天气</Badge>
             </div>
             <CardDescription className='mt-1 flex items-center gap-1.5'>
               <MapPin />
@@ -40,7 +40,7 @@ export function WeatherToolCard({ weather }: { weather: WeatherResult }) {
             </CardDescription>
           </div>
           <CardAction>
-            <Badge variant='outline'>Weather Tool</Badge>
+            <Badge variant='outline'>天气服务</Badge>
           </CardAction>
         </div>
       </CardHeader>
@@ -113,7 +113,7 @@ export function WeatherToolLoadingCard({ location }: { location?: string }) {
             <CardTitle className='truncate text-base'>
               正在获取{location ? `${location}` : ''}天气
             </CardTitle>
-            <CardDescription>AG-UI 正在等待 Weather Tool 结果</CardDescription>
+            <CardDescription>正在等待天气服务返回结果</CardDescription>
           </div>
         </div>
       </CardHeader>
