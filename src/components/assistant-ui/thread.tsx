@@ -3,6 +3,8 @@
 import {
   createContext,
   useContext,
+  useEffect,
+  useRef,
   type ComponentType,
   type FC,
   type PropsWithChildren,
@@ -21,6 +23,7 @@ import {
   SuggestionPrimitive,
   ThreadPrimitive,
   type ToolCallMessagePartComponent,
+  useAui,
   useAuiState,
 } from '@assistant-ui/react'
 import {
@@ -39,11 +42,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import {
-  ComposerAddAttachment,
-  ComposerAttachments,
-  UserMessageAttachments,
-} from '@/components/assistant-ui/attachment'
+import { UserMessageAttachments } from '@/components/assistant-ui/attachment'
 import { MarkdownText } from '@/components/assistant-ui/markdown-text'
 import {
   Reasoning,
@@ -298,31 +297,27 @@ const ThreadSuggestionItem: FC = () => {
 const Composer: FC = () => {
   return (
     <ComposerPrimitive.Root className='aui-composer-root relative flex w-full flex-col'>
-      <ComposerPrimitive.AttachmentDropzone asChild>
-        <div
-          data-slot='aui_composer-shell'
-          className='border-border/60 data-[dragging=true]:border-ring focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))] dark:shadow-none'
-        >
-          <ComposerAttachments />
-          <ComposerPrimitive.Input
-            placeholder='Send a message...'
-            className='aui-composer-input caret-primary placeholder:text-muted-foreground/80 max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base outline-none'
-            rows={1}
-            autoFocus
-            enterKeyHint='send'
-            aria-label='Message input'
-          />
-          <ComposerAction />
-        </div>
-      </ComposerPrimitive.AttachmentDropzone>
+      <div
+        data-slot='aui_composer-shell'
+        className='border-border/60 focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] dark:shadow-none'
+      >
+        <ComposerPrimitive.Input
+          placeholder='Send a message...'
+          className='aui-composer-input caret-primary placeholder:text-muted-foreground/80 max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base outline-none'
+          rows={1}
+          autoFocus
+          enterKeyHint='send'
+          aria-label='Message input'
+        />
+        <ComposerAction />
+      </div>
     </ComposerPrimitive.Root>
   )
 }
 
 const ComposerAction: FC = () => {
   return (
-    <div className='aui-composer-action-wrapper relative flex items-center justify-between'>
-      <ComposerAddAttachment />
+    <div className='aui-composer-action-wrapper relative flex items-center justify-end'>
       <div className='flex items-center gap-1.5'>
         <AuiIf condition={(s) => s.thread.capabilities.dictation}>
           <AuiIf condition={(s) => s.composer.dictation == null}>
@@ -529,16 +524,7 @@ const AssistantActionBar: FC = () => {
       autohide='not-last'
       className='aui-assistant-action-bar-root text-muted-foreground animate-in fade-in col-start-3 row-start-2 -ms-1 flex gap-1 duration-200'
     >
-      <ActionBarPrimitive.Copy asChild>
-        <TooltipIconButton tooltip='Copy'>
-          <AuiIf condition={(s) => s.message.isCopied}>
-            <CheckIcon className='animate-in zoom-in-50 fade-in duration-200 ease-out' />
-          </AuiIf>
-          <AuiIf condition={(s) => !s.message.isCopied}>
-            <CopyIcon className='animate-in zoom-in-75 fade-in duration-150' />
-          </AuiIf>
-        </TooltipIconButton>
-      </ActionBarPrimitive.Copy>
+      <MessageCopyButton />
       <ActionBarPrimitive.Reload asChild>
         <TooltipIconButton tooltip='Refresh'>
           <RefreshCwIcon />
@@ -569,6 +555,87 @@ const AssistantActionBar: FC = () => {
       </ActionBarMorePrimitive.Root>
     </ActionBarPrimitive.Root>
   )
+}
+
+const MessageCopyButton: FC = () => {
+  const aui = useAui()
+  const resetTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
+    null
+  )
+  const isCopied = useAuiState((s) => s.message.isCopied)
+  const canCopy = useAuiState(
+    (s) =>
+      s.message.status?.type !== 'running' &&
+      s.message.parts.some(
+        (part) => part.type === 'text' && part.text.length > 0
+      )
+  )
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current)
+    }
+  }, [])
+
+  const handleCopy = async () => {
+    const text = aui.message().getCopyText()
+    if (!text) return
+
+    try {
+      await copyTextToClipboard(text)
+      aui.message().setIsCopied(true)
+      if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current)
+      resetTimerRef.current = window.setTimeout(() => {
+        aui.message().setIsCopied(false)
+        resetTimerRef.current = null
+      }, 3000)
+    } catch {
+      // Keep the original icon when the browser blocks both copy mechanisms.
+    }
+  }
+
+  return (
+    <TooltipIconButton
+      tooltip={isCopied ? 'Copied' : 'Copy'}
+      disabled={!canCopy}
+      onClick={() => void handleCopy()}
+    >
+      {isCopied ? (
+        <CheckIcon className='animate-in zoom-in-50 fade-in duration-200 ease-out' />
+      ) : (
+        <CopyIcon className='animate-in zoom-in-75 fade-in duration-150' />
+      )}
+    </TooltipIconButton>
+  )
+}
+
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return
+    } catch {
+      // Fall through for HTTP deployments and browsers that deny the API.
+    }
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.inset = '0'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+
+  try {
+    if (!document.execCommand('copy')) {
+      throw new Error('Copy command was rejected')
+    }
+  } finally {
+    textarea.remove()
+  }
 }
 
 const UserMessage: FC = () => {

@@ -609,11 +609,14 @@ function ConversationButton({
           active && 'bg-sidebar-accent text-sidebar-accent-foreground'
         )}
       >
-        <div className='flex w-full items-center gap-2'>
-          <span className='truncate text-sm font-medium'>
+        <div className='flex w-full min-w-0 items-center gap-2'>
+          <span className='min-w-0 flex-1 truncate text-sm font-medium'>
             {conversation.title}
           </span>
-          <span className='text-muted-foreground ms-auto shrink-0 text-xs'>
+          <span
+            className='text-muted-foreground shrink-0 text-xs whitespace-nowrap tabular-nums'
+            title={conversation.updatedAt}
+          >
             {conversation.updatedAt}
           </span>
         </div>
