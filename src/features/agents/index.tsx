@@ -31,7 +31,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import {
   Thread,
@@ -446,8 +445,8 @@ export function AgentWorkspace({
               </Button>
             </div>
             <Separator />
-            <ScrollArea className='min-h-0 flex-1'>
-              <div className='flex flex-col gap-1 p-2'>
+            <div className='min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto'>
+              <div className='flex w-full min-w-0 flex-col gap-1 p-2'>
                 {conversationError ? (
                   <div className='text-destructive px-3 py-2 text-xs'>
                     {conversationError}
@@ -476,7 +475,7 @@ export function AgentWorkspace({
                   </div>
                 )}
               </div>
-            </ScrollArea>
+            </div>
           </aside>
 
           <section className='bg-background min-h-0'>
