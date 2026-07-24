@@ -1,4 +1,5 @@
 import {
+  EventType,
   HttpAgent,
   type AgentSubscriber,
   type RunAgentParameters,
@@ -15,6 +16,9 @@ type AbortableRunParameters = RunAgentParameters & {
 
 export const AGENT_RUN_CONFLICT_MESSAGE =
   '上一轮请求仍在结束，请稍候再试。若持续出现，请刷新当前会话。'
+export const AGENT_RUN_INCOMPLETE_MESSAGE = '智能体连接提前结束，请重试。'
+
+const LOCAL_PROGRESS_SEQUENCE = 2_147_483_647
 
 export class RuntimeHttpAgent extends HttpAgent {
   private activeRun: Promise<RunAgentResult> | null = null
@@ -65,9 +69,10 @@ export class RuntimeHttpAgent extends HttpAgent {
     })
 
     try {
+      const guardedSubscriber = terminalGuard(parameters, subscriber)
       return await super.runAgent(
         { ...parameters, abortController: requestController },
-        subscriber
+        guardedSubscriber
       )
     } catch (error) {
       if (httpStatus(error) === 409) {
@@ -79,6 +84,97 @@ export class RuntimeHttpAgent extends HttpAgent {
         signal.removeEventListener('abort', listener)
       )
     }
+  }
+}
+
+function terminalGuard(
+  parameters?: AbortableRunParameters,
+  subscriber?: AgentSubscriber
+): AgentSubscriber | undefined {
+  if (!subscriber) return undefined
+
+  let terminalObserved = false
+  const markTerminal = () => {
+    terminalObserved = true
+  }
+
+  return {
+    ...subscriber,
+    onEvent: (params) => {
+      if (
+        params.event.type === 'RUN_FINISHED' ||
+        params.event.type === 'RUN_ERROR'
+      ) {
+        markTerminal()
+      }
+      return subscriber.onEvent?.(params)
+    },
+    onRunFinishedEvent: (params) => {
+      markTerminal()
+      return subscriber.onRunFinishedEvent?.(params)
+    },
+    onRunErrorEvent: (params) => {
+      markTerminal()
+      if (subscriber.onRunErrorEvent) {
+        return subscriber.onRunErrorEvent(params)
+      }
+      const error = Object.assign(
+        new Error(params.event.message || AGENT_RUN_INCOMPLETE_MESSAGE),
+        params.event.code ? { code: params.event.code } : {}
+      )
+      return subscriber.onRunFailed?.({ ...params, error })
+    },
+    onRunFailed: (params) => {
+      markTerminal()
+      return subscriber.onRunFailed?.(params)
+    },
+    onRunFinalized: (params) => {
+      if (terminalObserved) {
+        return subscriber.onRunFinalized?.(params)
+      }
+
+      markTerminal()
+      const runId = parameters?.runId || params.input.runId
+      const messageId = `execution-progress-${runId}`
+      const progressDelta = `${JSON.stringify({
+        kind: 'execution_progress',
+        stepId: 'response',
+        phase: 'response',
+        status: 'failed',
+        title: '连接已中断',
+        detail: '未收到完整的运行结果，请重试',
+        sequence: LOCAL_PROGRESS_SEQUENCE,
+      })}\n`
+      const progressStart = subscriber.onReasoningMessageStartEvent?.({
+        ...params,
+        event: {
+          type: EventType.REASONING_MESSAGE_START,
+          messageId,
+          role: 'reasoning',
+        },
+      })
+      const progressContent = subscriber.onReasoningMessageContentEvent?.({
+        ...params,
+        event: {
+          type: EventType.REASONING_MESSAGE_CONTENT,
+          messageId,
+          delta: progressDelta,
+        },
+        reasoningMessageBuffer: '',
+      })
+      const progressEnd = subscriber.onReasoningMessageEndEvent?.({
+        ...params,
+        event: { type: EventType.REASONING_MESSAGE_END, messageId },
+        reasoningMessageBuffer: progressDelta,
+      })
+      const runFailed = subscriber.onRunFailed?.({
+        ...params,
+        error: new Error(AGENT_RUN_INCOMPLETE_MESSAGE),
+      })
+      return Promise.all([progressStart, progressContent, progressEnd, runFailed]).then(
+        () => undefined
+      )
+    },
   }
 }
 
