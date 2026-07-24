@@ -11,12 +11,14 @@ import '@assistant-ui/react-markdown/styles/dot.css'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
+import { normalizeLlmMarkdown } from '@/components/assistant-ui/markdown-preprocess'
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
 
 const MarkdownTextImpl = () => {
   return (
     <MarkdownTextPrimitive
       remarkPlugins={[remarkGfm]}
+      preprocess={normalizeLlmMarkdown}
       className='aui-md'
       components={defaultComponents}
       defer
