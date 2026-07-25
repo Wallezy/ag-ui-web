@@ -5,6 +5,7 @@ import {
   AGENT_RUN_CONFLICT_MESSAGE,
   AGENT_RUN_INCOMPLETE_MESSAGE,
   RuntimeHttpAgent,
+  TASK_DELTA_UNKNOWN_RESULT_MESSAGE,
 } from '../src/features/agents/runtime-http-agent.ts'
 
 const input: RunAgentParameters = {
@@ -196,6 +197,7 @@ test('forwards one queued task delta with the current user message id', async ()
     sourceMessageId: 'message-2',
   })
   assert.equal('oaTaskDelta' in (bodies[1] as { forwardedProps: object }).forwardedProps, false)
+  assert.equal(agent.taskDeltaStore.getSnapshot().status, 'ACKNOWLEDGED')
 })
 
 test('retries a failed task delta only with the same source message id', async () => {
@@ -223,6 +225,183 @@ test('retries a failed task delta only with the same source message id', async (
   assert.ok(bodies[0]?.forwardedProps.oaTaskDelta)
   assert.equal(bodies[1]?.forwardedProps.oaTaskDelta, undefined)
   assert.ok(bodies[2]?.forwardedProps.oaTaskDelta)
+})
+
+test('retries an unknown task delta result only with its fixed source message id', async () => {
+  const bodies: Array<{ forwardedProps: Record<string, unknown> }> = []
+  let attempts = 0
+  const agent = new RuntimeHttpAgent({
+    url: 'http://agent.test/api/agent/ag-ui',
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      attempts += 1
+      if (attempts === 1) throw new TypeError('network reset')
+      return sseResponse(
+        { type: 'RUN_STARTED', threadId: 'conversation-1', runId: 'run-1' },
+        { type: 'RUN_FINISHED', threadId: 'conversation-1', runId: 'run-1' }
+      )
+    },
+  })
+  agent.queueTaskDelta({
+    schemaVersion: 1,
+    operation: 'REPLACE_SLOT',
+    taskId: 'task-1',
+    expectedVersion: 2,
+    slotName: 'projectName',
+    newValue: '项目甲',
+  })
+  const original = {
+    ...input,
+    messages: [{ id: 'message-fixed', role: 'user', content: '修改项目' }],
+  }
+
+  await assert.rejects(
+    agent.runAgent(original),
+    (error: unknown) =>
+      error instanceof Error && error.message === TASK_DELTA_UNKNOWN_RESULT_MESSAGE
+  )
+  assert.equal(agent.taskDeltaStore.getSnapshot().status, 'RETRYABLE_UNKNOWN')
+  assert.equal(agent.retryTaskDelta(), true)
+  await agent.runAgent({
+    ...input,
+    messages: [{ id: 'message-new', role: 'user', content: '新问题' }],
+  })
+  await agent.runAgent(original)
+
+  assert.ok(bodies[0]?.forwardedProps.oaTaskDelta)
+  assert.equal(bodies[1]?.forwardedProps.oaTaskDelta, undefined)
+  assert.deepEqual(
+    bodies[2]?.forwardedProps.oaTaskDelta,
+    bodies[0]?.forwardedProps.oaTaskDelta
+  )
+  assert.equal(agent.taskDeltaStore.getSnapshot().status, 'ACKNOWLEDGED')
+})
+
+test('marks an aborted task delta as an unknown result', async () => {
+  let requestSignal: AbortSignal | null = null
+  let notifyStarted!: () => void
+  const started = new Promise<void>((resolve) => {
+    notifyStarted = resolve
+  })
+  const agent = new RuntimeHttpAgent({
+    url: 'http://agent.test/api/agent/ag-ui',
+    fetch: async (_url, init) => {
+      requestSignal = init?.signal ?? null
+      notifyStarted()
+      return await new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true }
+        )
+      })
+    },
+  })
+  agent.queueTaskDelta({
+    schemaVersion: 1,
+    operation: 'CLEAR_SLOT',
+    taskId: 'task-1',
+    expectedVersion: 2,
+    slotName: 'projectName',
+  })
+  const controller = new AbortController()
+  const run = agent.runAgent(
+    {
+      ...input,
+      messages: [{ id: 'message-abort', role: 'user', content: '清除项目' }],
+    },
+    undefined,
+    { signal: controller.signal }
+  )
+
+  await started
+  controller.abort()
+  await run.catch(() => undefined)
+
+  assert.equal(requestSignal?.aborted, true)
+  assert.equal(agent.taskDeltaStore.getSnapshot().status, 'RETRYABLE_UNKNOWN')
+  assert.equal(
+    agent.taskDeltaStore.getSnapshot().failureKind,
+    'unknown_result'
+  )
+})
+
+test('requires authoritative rebase after a task delta conflict', async () => {
+  const bodies: Array<{ forwardedProps: Record<string, unknown> }> = []
+  let attempts = 0
+  const agent = new RuntimeHttpAgent({
+    url: 'http://agent.test/api/agent/ag-ui',
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      attempts += 1
+      if (attempts === 1) return new Response('', { status: 409 })
+      return sseResponse(
+        { type: 'RUN_STARTED', threadId: 'conversation-1', runId: 'run-2' },
+        { type: 'RUN_FINISHED', threadId: 'conversation-1', runId: 'run-2' }
+      )
+    },
+  })
+  agent.queueTaskDelta({
+    schemaVersion: 1,
+    operation: 'REPLACE_SLOT',
+    taskId: 'task-1',
+    expectedVersion: 2,
+    slotName: 'projectName',
+    newValue: '项目乙',
+  })
+
+  await assert.rejects(
+    agent.runAgent({
+      ...input,
+      messages: [{ id: 'message-conflict', role: 'user', content: '修改项目' }],
+    })
+  )
+  assert.deepEqual(
+    {
+      status: agent.taskDeltaStore.getSnapshot().status,
+      refresh: agent.taskDeltaStore.getSnapshot().authoritativeRefreshRequired,
+    },
+    { status: 'CONFLICTED', refresh: true }
+  )
+  assert.equal(agent.retryTaskDelta(), false)
+  assert.equal(agent.rebaseTaskDelta(5), true)
+  await agent.runAgent({
+    ...input,
+    runId: 'run-2',
+    messages: [{ id: 'message-rebased', role: 'user', content: '按最新状态修改项目' }],
+  })
+
+  assert.deepEqual(bodies[1]?.forwardedProps.oaTaskDelta, {
+    schemaVersion: 1,
+    operation: 'REPLACE_SLOT',
+    taskId: 'task-1',
+    expectedVersion: 5,
+    slotName: 'projectName',
+    newValue: '项目乙',
+    sourceMessageId: 'message-rebased',
+  })
+})
+
+test('discard releases a failed delta and duplicate queueing never creates two deltas', () => {
+  const agent = new RuntimeHttpAgent({
+    url: 'http://agent.test/api/agent/ag-ui',
+    fetch: async () => new Response('', { status: 503 }),
+  })
+  const first = {
+    schemaVersion: 1 as const,
+    operation: 'CLEAR_SLOT' as const,
+    taskId: 'task-1',
+    expectedVersion: 2,
+    slotName: 'projectName',
+  }
+  assert.equal(agent.queueTaskDelta(first), true)
+  assert.equal(agent.queueTaskDelta(first), false)
+  assert.equal(agent.discardTaskDelta(), true)
+  assert.equal(agent.taskDeltaStore.getSnapshot().status, 'DISCARDED')
+  assert.equal(
+    agent.queueTaskDelta({ ...first, taskId: 'task-2', expectedVersion: 0 }),
+    true
+  )
 })
 
 function sseResponse(...events: object[]) {

@@ -9,6 +9,7 @@ import {
   AgentTaskViewStore,
   OA_PUBLIC_AGENT_EVENT,
 } from './oa-public-events.ts'
+import { TaskDeltaLifecycleStore } from './task-delta.ts'
 
 type RuntimeRunOptions = {
   signal?: AbortSignal
@@ -36,20 +37,32 @@ export type OaTaskDeltaRequest = {
 export const AGENT_RUN_CONFLICT_MESSAGE =
   '上一轮请求仍在结束，请稍候再试。若持续出现，请刷新当前会话。'
 export const AGENT_RUN_INCOMPLETE_MESSAGE = '智能体连接提前结束，请重试。'
+export const TASK_DELTA_UNKNOWN_RESULT_MESSAGE =
+  '修改结果暂时无法确认，请重试本次修改或将其废弃。'
+export const TASK_DELTA_CONNECTION_FAILURE_MESSAGE =
+  '修改未能送达服务端，请检查连接后重试。'
 
 const LOCAL_PROGRESS_SEQUENCE = 2_147_483_647
 
 export class RuntimeHttpAgent extends HttpAgent {
   private activeRun: Promise<RunAgentResult> | null = null
   readonly taskViewStore = new AgentTaskViewStore()
-  private queuedTaskDelta: OaTaskDeltaRequest | null = null
-  private inFlightTaskDelta:
-    (OaTaskDeltaRequest & { sourceMessageId: string }) | null = null
+  readonly taskDeltaStore = new TaskDeltaLifecycleStore()
 
   queueTaskDelta(delta: OaTaskDeltaRequest) {
-    if (this.queuedTaskDelta || this.inFlightTaskDelta) return false
-    this.queuedTaskDelta = { ...delta }
-    return true
+    return this.taskDeltaStore.queue(delta)
+  }
+
+  retryTaskDelta() {
+    return this.taskDeltaStore.retry()
+  }
+
+  discardTaskDelta() {
+    return this.taskDeltaStore.discard()
+  }
+
+  rebaseTaskDelta(expectedVersion: number) {
+    return this.taskDeltaStore.rebase(expectedVersion)
   }
 
   override runAgent(
@@ -96,17 +109,11 @@ export class RuntimeHttpAgent extends HttpAgent {
       else signal.addEventListener('abort', listener, { once: true })
       return { signal, listener }
     })
+    let taskDelta: OaTaskDeltaRequest | null = null
 
     try {
       const sourceMessageId = latestUserMessageId(parameters)
-      let taskDelta = this.inFlightTaskDelta
-      if (this.queuedTaskDelta && sourceMessageId) {
-        taskDelta = { ...this.queuedTaskDelta, sourceMessageId }
-        this.queuedTaskDelta = null
-        this.inFlightTaskDelta = taskDelta
-      } else if (taskDelta?.sourceMessageId !== sourceMessageId) {
-        taskDelta = null
-      }
+      taskDelta = this.taskDeltaStore.prepareForSend(sourceMessageId)
       const forwardedParameters = taskDelta
         ? {
             ...parameters,
@@ -124,11 +131,30 @@ export class RuntimeHttpAgent extends HttpAgent {
         { ...forwardedParameters, abortController: requestController },
         guardedSubscriber
       )
-      if (this.inFlightTaskDelta === taskDelta) this.inFlightTaskDelta = null
+      if (taskDelta) {
+        if (requestController.signal.aborted) {
+          this.taskDeltaStore.markUnknown(taskDelta)
+        } else {
+          this.taskDeltaStore.acknowledge(taskDelta)
+        }
+      }
       return result
     } catch (error) {
-      if (httpStatus(error) === 409) {
+      const status = httpStatus(error)
+      if (status === 409) {
+        if (taskDelta) {
+          this.taskDeltaStore.markConflict(taskDelta)
+          this.taskViewStore.invalidate()
+        }
         throw new Error(AGENT_RUN_CONFLICT_MESSAGE)
+      }
+      if (taskDelta && status === null) {
+        this.taskDeltaStore.markUnknown(taskDelta)
+        throw new Error(TASK_DELTA_UNKNOWN_RESULT_MESSAGE, { cause: error })
+      }
+      if (taskDelta) {
+        this.taskDeltaStore.markConnectionFailure(taskDelta)
+        throw new Error(TASK_DELTA_CONNECTION_FAILURE_MESSAGE, { cause: error })
       }
       throw error
     } finally {

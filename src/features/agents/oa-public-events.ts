@@ -227,6 +227,13 @@ export class AgentTaskViewStore {
     this.listeners.forEach((listener) => listener())
     return true
   }
+
+  invalidate() {
+    if (this.state === initialAgentTaskViewState) return false
+    this.state = initialAgentTaskViewState
+    this.listeners.forEach((listener) => listener())
+    return true
+  }
 }
 
 function verificationTerminal(status: string | undefined) {
