@@ -1,19 +1,33 @@
-import { useState, useSyncExternalStore } from 'react'
-import { ChevronDown, FileCheck2, ListChecks } from 'lucide-react'
+import { useState, useSyncExternalStore, type FormEvent } from 'react'
+import { useThreadRuntime } from '@assistant-ui/react'
+import {
+  ChevronDown,
+  FileCheck2,
+  ListChecks,
+  Pencil,
+  Send,
+  X,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import type { AgentTaskViewStore } from './oa-public-events.ts'
+import type { RuntimeHttpAgent } from './runtime-http-agent'
+import { fieldCorrectionDelta } from './task-delta'
 import { understandingCardModel } from './understanding-card-data.ts'
 
 export function AgentUnderstandingCard({
   store,
+  agent,
 }: {
   store: AgentTaskViewStore
+  agent: RuntimeHttpAgent
 }) {
+  const thread = useThreadRuntime()
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const model = understandingCardModel(state)
   const [open, setOpen] = useState(true)
@@ -56,20 +70,113 @@ export function AgentUnderstandingCard({
                 <dd className='truncate font-medium'>{model.operation}</dd>
               </div>
               {model.fields.map((field) => (
-                <div
+                <UnderstandingFieldEditor
                   key={field.name}
-                  className='flex min-w-0 items-center justify-between gap-3 text-xs'
-                >
-                  <dt className='text-muted-foreground truncate'>
-                    {field.label}
-                  </dt>
-                  <dd className='shrink-0 font-medium'>{field.status}</dd>
-                </div>
+                  field={field}
+                  taskId={state.taskId}
+                  taskVersion={state.taskVersion}
+                  submit={(delta, message) => {
+                    if (!agent.queueTaskDelta(delta)) return false
+                    thread.append(message)
+                    return true
+                  }}
+                />
               ))}
             </dl>
           </CollapsibleContent>
         </div>
       </Collapsible>
+    </div>
+  )
+}
+
+function UnderstandingFieldEditor({
+  field,
+  taskId,
+  taskVersion,
+  submit,
+}: {
+  field: { name: string; label: string; status: string }
+  taskId: string | null
+  taskVersion: number
+  submit: (
+    delta: NonNullable<ReturnType<typeof fieldCorrectionDelta>>,
+    message: string
+  ) => boolean
+}) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+
+  const send = (event: FormEvent, nextValue: string | null) => {
+    event.preventDefault()
+    if (!taskId) return
+    const delta = fieldCorrectionDelta({
+      taskId,
+      expectedVersion: taskVersion,
+      slotName: field.name,
+      value: nextValue,
+    })
+    if (!delta) return
+    const normalized = nextValue?.trim() ?? ''
+    const message = normalized
+      ? `将${field.label}修改为${normalized}`
+      : `清除${field.label}条件`
+    if (submit(delta, message)) {
+      setEditing(false)
+      setValue('')
+    }
+  }
+
+  return (
+    <div className='col-span-1 min-w-0 text-xs'>
+      <div className='flex items-center justify-between gap-3'>
+        <dt className='text-muted-foreground truncate'>{field.label}</dt>
+        <dd className='flex shrink-0 items-center gap-1 font-medium'>
+          {field.status}
+          <button
+            type='button'
+            className='hover:bg-muted focus-visible:ring-ring inline-flex size-6 items-center justify-center rounded-sm focus-visible:ring-2 focus-visible:outline-none'
+            aria-label={`修改${field.label}`}
+            onClick={() => setEditing((current) => !current)}
+          >
+            <Pencil className='size-3.5' />
+          </button>
+        </dd>
+      </div>
+      {editing ? (
+        <form
+          className='mt-1.5 flex gap-1.5'
+          onSubmit={(event) => send(event, value)}
+        >
+          <input
+            className='border-input bg-background h-8 min-w-0 flex-1 rounded-md border px-2 text-xs'
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            maxLength={500}
+            autoFocus
+            aria-label={`${field.label}的新值`}
+          />
+          <Button
+            type='submit'
+            size='icon'
+            className='size-8'
+            disabled={!value.trim()}
+            aria-label={`提交${field.label}修改`}
+          >
+            <Send className='size-3.5' />
+          </Button>
+          <Button
+            type='button'
+            size='icon'
+            variant='outline'
+            className='size-8'
+            aria-label={`清除${field.label}`}
+            onClick={(event) => send(event, null)}
+          >
+            <X className='size-3.5' />
+          </Button>
+        </form>
+      ) : null}
     </div>
   )
 }

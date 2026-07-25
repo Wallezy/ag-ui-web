@@ -573,7 +573,7 @@ function AgentThread({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <div className='flex h-full min-h-0 flex-col'>
-        <AgentUnderstandingCard store={agent.taskViewStore} />
+        <AgentUnderstandingCard store={agent.taskViewStore} agent={agent} />
         <AgentClarificationCard agent={agent} />
         <div className='min-h-0 flex-1'>
           <Thread

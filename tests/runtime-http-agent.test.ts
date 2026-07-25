@@ -198,6 +198,33 @@ test('forwards one queued task delta with the current user message id', async ()
   assert.equal('oaTaskDelta' in (bodies[1] as { forwardedProps: object }).forwardedProps, false)
 })
 
+test('retries a failed task delta only with the same source message id', async () => {
+  const bodies: Array<{ forwardedProps: Record<string, unknown> }> = []
+  let attempts = 0
+  const agent = new RuntimeHttpAgent({
+    url: 'http://agent.test/api/agent/ag-ui',
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      attempts += 1
+      if (attempts === 1) return new Response('', { status: 503 })
+      return sseResponse(
+        { type: 'RUN_STARTED', threadId: 'conversation-1', runId: 'run-1' },
+        { type: 'RUN_FINISHED', threadId: 'conversation-1', runId: 'run-1' }
+      )
+    },
+  })
+  agent.queueTaskDelta({ schemaVersion: 1, operation: 'REPLACE_SLOT', taskId: 'task-1', expectedVersion: 2, slotName: 'projectName', newValue: '项目甲' })
+  const sameMessage = { ...input, messages: [{ id: 'message-retry', role: 'user', content: '修改项目' }] }
+
+  await assert.rejects(agent.runAgent(sameMessage))
+  await agent.runAgent({ ...input, messages: [{ id: 'different-message', role: 'user', content: '新问题' }] })
+  await agent.runAgent(sameMessage)
+
+  assert.ok(bodies[0]?.forwardedProps.oaTaskDelta)
+  assert.equal(bodies[1]?.forwardedProps.oaTaskDelta, undefined)
+  assert.ok(bodies[2]?.forwardedProps.oaTaskDelta)
+})
+
 function sseResponse(...events: object[]) {
   const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
   return new Response(body, {

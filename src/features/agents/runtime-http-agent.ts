@@ -43,9 +43,11 @@ export class RuntimeHttpAgent extends HttpAgent {
   private activeRun: Promise<RunAgentResult> | null = null
   readonly taskViewStore = new AgentTaskViewStore()
   private queuedTaskDelta: OaTaskDeltaRequest | null = null
+  private inFlightTaskDelta:
+    (OaTaskDeltaRequest & { sourceMessageId: string }) | null = null
 
   queueTaskDelta(delta: OaTaskDeltaRequest) {
-    if (this.queuedTaskDelta) return false
+    if (this.queuedTaskDelta || this.inFlightTaskDelta) return false
     this.queuedTaskDelta = { ...delta }
     return true
   }
@@ -96,18 +98,21 @@ export class RuntimeHttpAgent extends HttpAgent {
     })
 
     try {
-      const queuedTaskDelta = this.queuedTaskDelta
       const sourceMessageId = latestUserMessageId(parameters)
-      const forwardedParameters = queuedTaskDelta
+      let taskDelta = this.inFlightTaskDelta
+      if (this.queuedTaskDelta && sourceMessageId) {
+        taskDelta = { ...this.queuedTaskDelta, sourceMessageId }
+        this.queuedTaskDelta = null
+        this.inFlightTaskDelta = taskDelta
+      } else if (taskDelta?.sourceMessageId !== sourceMessageId) {
+        taskDelta = null
+      }
+      const forwardedParameters = taskDelta
         ? {
             ...parameters,
             forwardedProps: {
               ...(parameters?.forwardedProps ?? {}),
-              oaTaskDelta: {
-                ...queuedTaskDelta,
-                sourceMessageId:
-                  sourceMessageId ?? queuedTaskDelta.sourceMessageId,
-              },
+              oaTaskDelta: taskDelta,
             },
           }
         : parameters
@@ -119,7 +124,7 @@ export class RuntimeHttpAgent extends HttpAgent {
         { ...forwardedParameters, abortController: requestController },
         guardedSubscriber
       )
-      if (this.queuedTaskDelta === queuedTaskDelta) this.queuedTaskDelta = null
+      if (this.inFlightTaskDelta === taskDelta) this.inFlightTaskDelta = null
       return result
     } catch (error) {
       if (httpStatus(error) === 409) {
