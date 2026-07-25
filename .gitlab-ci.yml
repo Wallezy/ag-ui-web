@@ -9,7 +9,6 @@ default:
     - cloud
 
 variables:
-  BUILD_BRANCH_NAME: "dev"
   PNPM_VERSION: "11.10.0"
 
 cache:
@@ -25,7 +24,7 @@ stages:
   - deploy-ks
   - dingtalk
 
-install:
+quality:
   image: registry.cn-hangzhou.aliyuncs.com/rcmirrors/node:22
   stage: install
   before_script:
@@ -44,21 +43,25 @@ install:
     - pnpm -v
   script:
     - pnpm install --frozen-lockfile
+    - cd contracts && sha256sum -c SHA256SUMS && cd ..
+    - pnpm run typecheck
     - pnpm run test
+    - pnpm run lint
+    - pnpm run format:check
     - pnpm run build
   artifacts:
     paths:
       - dist
     expire_in: 1 day
-  only:
-    variables:
-      - $CI_COMMIT_BRANCH == $BUILD_BRANCH_NAME
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "github-dev"'
 
 build:
   image: registry.cn-hangzhou.aliyuncs.com/rcmirrors/docker:28
   stage: build
   needs:
-    - job: install
+    - job: quality
       artifacts: true
   cache:
     key: $CI_PROJECT_ID
@@ -75,9 +78,8 @@ build:
     - docker build -t $DOCKER_REGISTRY_URL/$CI_PROJECT_NAME:$IMAGE_TAG .
     - docker push $DOCKER_REGISTRY_URL/$CI_PROJECT_NAME:$IMAGE_TAG
     - rm -rf dist
-  only:
-    variables:
-      - $CI_COMMIT_BRANCH == $BUILD_BRANCH_NAME
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
 
 deploy-ks:
   cache: {}
@@ -88,15 +90,16 @@ deploy-ks:
     - mkdir -p ~/.kube
     - cat $K8S_KUBE_CONFIG_DEV > ~/.kube/config
   stage: deploy-ks
+  needs:
+    - job: build
   script:
     - echo $CI_PROJECT_NAME
     - echo $DOCKER_REGISTRY_VPC_URL
     - FORMAT_COMMIT_TIME=$(echo $CI_COMMIT_TIMESTAMP | sed 's/[:-]/-/g; s/+.*$//g')
     - IMAGE_TAG=$FORMAT_COMMIT_TIME${CI_COMMIT_TAG:+-$CI_COMMIT_TAG}
     - kubectl set image -n=oa deployment/$CI_PROJECT_NAME $CI_PROJECT_NAME=$DOCKER_REGISTRY_URL/$CI_PROJECT_NAME:$IMAGE_TAG
-  only:
-    variables:
-      - $CI_COMMIT_BRANCH == $BUILD_BRANCH_NAME
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
 
 dingtalk-success:
   cache: {}
@@ -104,9 +107,8 @@ dingtalk-success:
   image: registry.cn-hangzhou.aliyuncs.com/rcmirrors/openjdk:8-jdk-slim
   extends: .dingtalk-success
   when: on_success
-  only:
-    variables:
-      - $CI_COMMIT_BRANCH == $BUILD_BRANCH_NAME
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
 
 dingtalk-failure:
   cache: {}
@@ -114,6 +116,5 @@ dingtalk-failure:
   image: registry.cn-hangzhou.aliyuncs.com/rcmirrors/openjdk:8-jdk-slim
   extends: .dingtalk-failure
   when: on_failure
-  only:
-    variables:
-      - $CI_COMMIT_BRANCH == $BUILD_BRANCH_NAME
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "dev"'
