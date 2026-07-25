@@ -19,7 +19,14 @@ type PublicPayload = {
   stepId?: string
   stepStatus?: string
   selectedIntentId?: string
+  questionId?: string
+  questionKind?: 'SEMANTIC_CLARIFICATION' | 'USER_ACTION' | 'WRITE_CONFIRMATION'
+  options?: readonly PublicQuestionOption[]
+  allowFreeText?: boolean
+  expiresAt?: string
 }
+
+export type PublicQuestionOption = { optionId: string; label: string }
 
 export type OaPublicAgentEvent = {
   schemaVersion: 2
@@ -92,6 +99,11 @@ const OPTIONAL_PAYLOAD_KEYS = [
   'stepId',
   'stepStatus',
   'selectedIntentId',
+  'questionId',
+  'questionKind',
+  'options',
+  'allowFreeText',
+  'expiresAt',
 ] as const
 
 export function parseOaPublicAgentEvent(
@@ -125,6 +137,7 @@ export function reduceAgentTaskViewState(
   if (event.taskVersion < base.taskVersion) return base
   if (
     base.terminal !== null &&
+    event.taskVersion <= base.taskVersion &&
     event.eventType !== 'OA_VERIFICATION_COMPLETED'
   ) {
     return base
@@ -138,6 +151,9 @@ export function reduceAgentTaskViewState(
     taskVersion: event.taskVersion,
     eventIds,
     v2Observed: true,
+    ...(event.taskVersion > base.taskVersion
+      ? { terminal: null, pending: null }
+      : {}),
   }
   const payload = event.payload
 
@@ -241,9 +257,46 @@ function isPublicPayload(value: unknown): value is PublicPayload {
       }
       continue
     }
+    if (key === 'options') {
+      if (!isQuestionOptions(item)) return false
+      continue
+    }
+    if (key === 'allowFreeText') {
+      if (typeof item !== 'boolean') return false
+      continue
+    }
+    if (key === 'expiresAt') {
+      if (typeof item !== 'string' || !isIsoInstant(item)) return false
+      continue
+    }
+    if (key === 'questionKind') {
+      if (
+        ![
+          'SEMANTIC_CLARIFICATION',
+          'USER_ACTION',
+          'WRITE_CONFIRMATION',
+        ].includes(String(item))
+      )
+        return false
+      continue
+    }
     if (!isBoundedText(item, 160)) return false
   }
   return true
+}
+
+function isQuestionOptions(value: unknown): value is PublicQuestionOption[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 5 &&
+    value.every(
+      (option) =>
+        isRecord(option) &&
+        Object.keys(option).length === 2 &&
+        isIdentifier(option.optionId) &&
+        isBoundedText(option.label, 160)
+    )
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

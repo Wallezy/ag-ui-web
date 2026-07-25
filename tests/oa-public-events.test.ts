@@ -22,6 +22,35 @@ test('parses the v2 envelope and rejects unknown or unsafe input', () => {
   )
 })
 
+test('parses bounded clarification metadata and rejects malformed options', () => {
+  const clarification = parseOaPublicAgentEvent(event('question', 2, 'OA_CLARIFICATION_REQUIRED', {
+    questionId: 'question-1',
+    questionKind: 'SEMANTIC_CLARIFICATION',
+    options: [{ optionId: 'hours', label: '工时明细' }],
+    allowFreeText: true,
+    expiresAt: '2026-07-25T12:05:00Z',
+  }))
+  assert.equal(clarification?.payload.options?.[0]?.optionId, 'hours')
+  assert.equal(parseOaPublicAgentEvent(event('bad-question', 2, 'OA_CLARIFICATION_REQUIRED', {
+    options: [{ optionId: 'hours', label: '工时', hidden: 'unsafe' }],
+  })), null)
+})
+
+test('accepts a newer task version after waiting for clarification', () => {
+  const waiting = reduceAgentTaskViewState(
+    initialAgentTaskViewState,
+    parseOaPublicAgentEvent(event('question', 1, 'OA_CLARIFICATION_REQUIRED', {
+      questionId: 'question-1',
+    }))!
+  )
+  const resumed = reduceAgentTaskViewState(
+    waiting,
+    parseOaPublicAgentEvent(event('resumed', 2, 'OA_TASK_STATE_UPDATED'))!
+  )
+  assert.equal(resumed.terminal, null)
+  assert.equal(resumed.pending, null)
+})
+
 test('deduplicates replay and rejects stale task versions', () => {
   const first = parseOaPublicAgentEvent(event('same'))!
   const state = reduceAgentTaskViewState(initialAgentTaskViewState, first)

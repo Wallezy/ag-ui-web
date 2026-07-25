@@ -18,6 +18,21 @@ type AbortableRunParameters = RunAgentParameters & {
   abortController?: AbortController
 }
 
+export type OaTaskDeltaRequest = {
+  schemaVersion: 1
+  operation:
+    'SELECT_CANDIDATE' | 'ANSWER_CLARIFICATION' | 'REPLACE_SLOT' | 'CLEAR_SLOT'
+  taskId: string
+  expectedVersion: number
+  sourceMessageId?: string
+  slotName?: string
+  oldValue?: unknown
+  newValue?: unknown
+  questionId?: string
+  optionId?: string
+  freeText?: string
+}
+
 export const AGENT_RUN_CONFLICT_MESSAGE =
   '上一轮请求仍在结束，请稍候再试。若持续出现，请刷新当前会话。'
 export const AGENT_RUN_INCOMPLETE_MESSAGE = '智能体连接提前结束，请重试。'
@@ -27,6 +42,13 @@ const LOCAL_PROGRESS_SEQUENCE = 2_147_483_647
 export class RuntimeHttpAgent extends HttpAgent {
   private activeRun: Promise<RunAgentResult> | null = null
   readonly taskViewStore = new AgentTaskViewStore()
+  private queuedTaskDelta: OaTaskDeltaRequest | null = null
+
+  queueTaskDelta(delta: OaTaskDeltaRequest) {
+    if (this.queuedTaskDelta) return false
+    this.queuedTaskDelta = { ...delta }
+    return true
+  }
 
   override runAgent(
     parameters?: AbortableRunParameters,
@@ -74,14 +96,31 @@ export class RuntimeHttpAgent extends HttpAgent {
     })
 
     try {
+      const queuedTaskDelta = this.queuedTaskDelta
+      const sourceMessageId = latestUserMessageId(parameters)
+      const forwardedParameters = queuedTaskDelta
+        ? {
+            ...parameters,
+            forwardedProps: {
+              ...(parameters?.forwardedProps ?? {}),
+              oaTaskDelta: {
+                ...queuedTaskDelta,
+                sourceMessageId:
+                  sourceMessageId ?? queuedTaskDelta.sourceMessageId,
+              },
+            },
+          }
+        : parameters
       const guardedSubscriber = terminalGuard(
-        parameters,
+        forwardedParameters,
         publicEventSubscriber(this.taskViewStore, subscriber)
       )
-      return await super.runAgent(
-        { ...parameters, abortController: requestController },
+      const result = await super.runAgent(
+        { ...forwardedParameters, abortController: requestController },
         guardedSubscriber
       )
+      if (this.queuedTaskDelta === queuedTaskDelta) this.queuedTaskDelta = null
+      return result
     } catch (error) {
       if (httpStatus(error) === 409) {
         throw new Error(AGENT_RUN_CONFLICT_MESSAGE)
@@ -93,6 +132,23 @@ export class RuntimeHttpAgent extends HttpAgent {
       )
     }
   }
+}
+
+function latestUserMessageId(parameters?: AbortableRunParameters) {
+  if (
+    !parameters ||
+    !('messages' in parameters) ||
+    !Array.isArray(parameters.messages)
+  ) {
+    return null
+  }
+  const messages = parameters.messages
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.role === 'user' && typeof message.id === 'string')
+      return message.id
+  }
+  return null
 }
 
 function publicEventSubscriber(

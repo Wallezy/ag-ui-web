@@ -159,6 +159,45 @@ test('bridges an explicit RUN_ERROR to subscribers without a run-error handler',
   )
 })
 
+test('forwards one queued task delta with the current user message id', async () => {
+  const bodies: unknown[] = []
+  const agent = new RuntimeHttpAgent({
+    url: 'http://agent.test/api/agent/ag-ui',
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return sseResponse(
+        { type: 'RUN_STARTED', threadId: 'conversation-1', runId: 'run-1' },
+        { type: 'RUN_FINISHED', threadId: 'conversation-1', runId: 'run-1' }
+      )
+    },
+  })
+  assert.equal(agent.queueTaskDelta({
+    schemaVersion: 1,
+    operation: 'SELECT_CANDIDATE',
+    taskId: 'task-1',
+    expectedVersion: 4,
+    questionId: 'question-1',
+    optionId: 'hours',
+  }), true)
+
+  await agent.runAgent({
+    ...input,
+    messages: [{ id: 'message-2', role: 'user', content: '工时明细' }],
+  })
+  await agent.runAgent(input)
+
+  assert.deepEqual((bodies[0] as { forwardedProps: { oaTaskDelta: unknown } }).forwardedProps.oaTaskDelta, {
+    schemaVersion: 1,
+    operation: 'SELECT_CANDIDATE',
+    taskId: 'task-1',
+    expectedVersion: 4,
+    questionId: 'question-1',
+    optionId: 'hours',
+    sourceMessageId: 'message-2',
+  })
+  assert.equal('oaTaskDelta' in (bodies[1] as { forwardedProps: object }).forwardedProps, false)
+})
+
 function sseResponse(...events: object[]) {
   const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
   return new Response(body, {

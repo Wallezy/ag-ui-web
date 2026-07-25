@@ -54,6 +54,7 @@ import {
   type AgentConfig,
 } from './api'
 import { classifyOaSessionFailure } from './api-error'
+import { AgentClarificationCard } from './clarification-card'
 import {
   AgentExecutionProgress,
   AgentExecutionProgressGroup,
@@ -573,6 +574,7 @@ function AgentThread({
     <AssistantRuntimeProvider runtime={runtime}>
       <div className='flex h-full min-h-0 flex-col'>
         <AgentUnderstandingCard store={agent.taskViewStore} />
+        <AgentClarificationCard agent={agent} />
         <div className='min-h-0 flex-1'>
           <Thread
             components={{
