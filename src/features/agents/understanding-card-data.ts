@@ -6,7 +6,10 @@ export type UnderstandingFieldStatus =
 export type UnderstandingField = {
   name: string
   label: string
+  valueSummary: string | null
+  source: string | null
   status: UnderstandingFieldStatus
+  editable: boolean
 }
 
 export type UnderstandingCardModel = {
@@ -48,11 +51,23 @@ export function understandingCardModel(
   if (!state.v2Observed || !state.understanding) return null
   const intentId = state.understanding.selectedIntentId ?? 'UNKNOWN'
   const status = publicFieldStatus(state.understanding.status)
-  const fields = (state.understanding.fields ?? []).map((name) => ({
-    name,
-    label: FIELD_LABELS[name] ?? readableFieldName(name),
-    status,
-  }))
+  const fields =
+    state.understanding.slots?.map((slot) => ({
+      name: slot.name,
+      label: slot.label,
+      valueSummary: slot.valueSummary,
+      source: slot.source,
+      status: publicSlotStatus(slot.status),
+      editable: slot.editable,
+    })) ??
+    (state.understanding.fields ?? []).map((name) => ({
+      name,
+      label: FIELD_LABELS[name] ?? readableFieldName(name),
+      valueSummary: null,
+      source: null,
+      status,
+      editable: true,
+    }))
   const writePreview =
     intentId.includes('PREPARE') ||
     intentId.includes('DRAFT') ||
@@ -63,6 +78,14 @@ export function understandingCardModel(
     writePreview,
     waitingConfirmation: state.understanding.status === 'WAITING_CONFIRMATION',
   }
+}
+
+function publicSlotStatus(status: string): UnderstandingFieldStatus {
+  if (status === 'NEEDS_CONFIRMATION' || status === 'CONFLICT')
+    return '需要确认'
+  if (status === 'GROUNDED') return '系统验证'
+  if (status === 'CONTEXT_INFERRED') return '会话推断'
+  return '已明确'
 }
 
 function publicFieldStatus(

@@ -14,6 +14,7 @@ type PublicPayload = {
   reasonCode: string
   displayMessage: string
   fields?: string[]
+  slots?: readonly PublicSlot[]
   status?: string
   action?: string
   stepId?: string
@@ -26,10 +27,21 @@ type PublicPayload = {
   expiresAt?: string
 }
 
+export type PublicSlot = {
+  name: string
+  label: string
+  valueSummary: string
+  source: string
+  status: string
+  critical: boolean
+  editable: boolean
+  conflictReason: string
+}
+
 export type PublicQuestionOption = { optionId: string; label: string }
 
 export type OaPublicAgentEvent = {
-  schemaVersion: 2
+  schemaVersion: 2 | 3
   eventId: string
   traceId: string
   taskId: string
@@ -94,6 +106,7 @@ const EVENT_TYPES: ReadonlySet<string> = new Set<OaPublicEventType>([
 
 const OPTIONAL_PAYLOAD_KEYS = [
   'fields',
+  'slots',
   'status',
   'action',
   'stepId',
@@ -109,7 +122,11 @@ const OPTIONAL_PAYLOAD_KEYS = [
 export function parseOaPublicAgentEvent(
   value: unknown
 ): OaPublicAgentEvent | null {
-  if (!isRecord(value) || value.schemaVersion !== 2) return null
+  if (
+    !isRecord(value) ||
+    (value.schemaVersion !== 2 && value.schemaVersion !== 3)
+  )
+    return null
   if (
     !isIdentifier(value.eventId) ||
     !isIdentifier(value.traceId) ||
@@ -120,7 +137,7 @@ export function parseOaPublicAgentEvent(
     !EVENT_TYPES.has(value.eventType) ||
     typeof value.occurredAt !== 'string' ||
     !isIsoInstant(value.occurredAt) ||
-    !isPublicPayload(value.payload)
+    !isPublicPayload(value.payload, value.schemaVersion)
   ) {
     return null
   }
@@ -243,7 +260,10 @@ function verificationTerminal(status: string | undefined) {
   return null
 }
 
-function isPublicPayload(value: unknown): value is PublicPayload {
+function isPublicPayload(
+  value: unknown,
+  schemaVersion: 2 | 3
+): value is PublicPayload {
   if (
     !isRecord(value) ||
     !isBoundedText(value.reasonCode, 160) ||
@@ -262,6 +282,10 @@ function isPublicPayload(value: unknown): value is PublicPayload {
       ) {
         return false
       }
+      continue
+    }
+    if (key === 'slots') {
+      if (schemaVersion !== 3 || !isPublicSlots(item)) return false
       continue
     }
     if (key === 'options') {
@@ -290,6 +314,23 @@ function isPublicPayload(value: unknown): value is PublicPayload {
     if (!isBoundedText(item, 160)) return false
   }
   return true
+}
+
+function isPublicSlots(value: unknown): value is readonly PublicSlot[] {
+  if (!Array.isArray(value) || value.length > 32) return false
+  return value.every(
+    (slot) =>
+      isRecord(slot) &&
+      isBoundedText(slot.name, 120) &&
+      isBoundedText(slot.label, 160) &&
+      isBoundedText(slot.valueSummary, 160) &&
+      isBoundedText(slot.source, 160) &&
+      isBoundedText(slot.status, 160) &&
+      typeof slot.critical === 'boolean' &&
+      typeof slot.editable === 'boolean' &&
+      typeof slot.conflictReason === 'string' &&
+      slot.conflictReason.length <= 160
+  )
 }
 
 function isQuestionOptions(value: unknown): value is PublicQuestionOption[] {

@@ -22,12 +22,28 @@ test('maps only public server fields and status labels', () => {
   assert.deepEqual(model, {
     operation: '查询工作项',
     fields: [
-      { name: 'assigneeName', label: '人员', status: '系统验证' },
-      { name: 'beginDate', label: '开始日期', status: '系统验证' },
-      { name: 'projectName', label: '项目', status: '系统验证' },
+      { name: 'assigneeName', label: '人员', valueSummary: null, source: null, status: '系统验证', editable: true },
+      { name: 'beginDate', label: '开始日期', valueSummary: null, source: null, status: '系统验证', editable: true },
+      { name: 'projectName', label: '项目', valueSummary: null, source: null, status: '系统验证', editable: true },
     ],
     writePreview: false,
     waitingConfirmation: false,
+  })
+})
+
+test('uses authoritative v3 values, status and editability', () => {
+  const model = understandingCardModel(state({
+    selectedIntentId: 'WORK_ITEM_QUERY',
+    slots: [{
+      name: 'assigneeName', label: '成员', valueSummary: '王翔',
+      source: 'USER_CORRECTION', status: 'GROUNDED', critical: true,
+      editable: true, conflictReason: '',
+    }],
+  }))
+
+  assert.deepEqual(model?.fields[0], {
+    name: 'assigneeName', label: '成员', valueSummary: '王翔',
+    source: 'USER_CORRECTION', status: '系统验证', editable: true,
   })
 })
 

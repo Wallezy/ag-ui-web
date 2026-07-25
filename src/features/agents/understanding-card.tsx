@@ -96,7 +96,13 @@ function UnderstandingFieldEditor({
   taskVersion,
   submit,
 }: {
-  field: { name: string; label: string; status: string }
+  field: {
+    name: string
+    label: string
+    valueSummary: string | null
+    status: string
+    editable: boolean
+  }
   taskId: string | null
   taskVersion: number
   submit: (
@@ -131,19 +137,27 @@ function UnderstandingFieldEditor({
     <div className='col-span-1 min-w-0 text-xs'>
       <div className='flex items-center justify-between gap-3'>
         <dt className='text-muted-foreground truncate'>{field.label}</dt>
-        <dd className='flex shrink-0 items-center gap-1 font-medium'>
-          {field.status}
-          <button
-            type='button'
-            className='hover:bg-muted focus-visible:ring-ring inline-flex size-6 items-center justify-center rounded-sm focus-visible:ring-2 focus-visible:outline-none'
-            aria-label={`修改${field.label}`}
-            onClick={() => setEditing((current) => !current)}
-          >
-            <Pencil className='size-3.5' />
-          </button>
+        <dd className='flex min-w-0 shrink items-center gap-1 font-medium'>
+          {field.valueSummary ? (
+            <span className='max-w-40 truncate'>{field.valueSummary}</span>
+          ) : null}
+          <span className='text-muted-foreground shrink-0'>{field.status}</span>
+          {field.editable ? (
+            <button
+              type='button'
+              className='hover:bg-muted focus-visible:ring-ring inline-flex size-6 items-center justify-center rounded-sm focus-visible:ring-2 focus-visible:outline-none'
+              aria-label={`修改${field.label}`}
+              onClick={() => {
+                setValue(field.valueSummary ?? '')
+                setEditing((current) => !current)
+              }}
+            >
+              <Pencil className='size-3.5' />
+            </button>
+          ) : null}
         </dd>
       </div>
-      {editing ? (
+      {editing && field.editable ? (
         <form
           className='mt-1.5 flex gap-1.5'
           onSubmit={(event) => send(event, value)}
