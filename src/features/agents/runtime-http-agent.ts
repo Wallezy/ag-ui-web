@@ -5,6 +5,10 @@ import {
   type RunAgentParameters,
   type RunAgentResult,
 } from '@ag-ui/client'
+import {
+  AgentTaskViewStore,
+  OA_PUBLIC_AGENT_EVENT,
+} from './oa-public-events.ts'
 
 type RuntimeRunOptions = {
   signal?: AbortSignal
@@ -22,6 +26,7 @@ const LOCAL_PROGRESS_SEQUENCE = 2_147_483_647
 
 export class RuntimeHttpAgent extends HttpAgent {
   private activeRun: Promise<RunAgentResult> | null = null
+  readonly taskViewStore = new AgentTaskViewStore()
 
   override runAgent(
     parameters?: AbortableRunParameters,
@@ -69,7 +74,10 @@ export class RuntimeHttpAgent extends HttpAgent {
     })
 
     try {
-      const guardedSubscriber = terminalGuard(parameters, subscriber)
+      const guardedSubscriber = terminalGuard(
+        parameters,
+        publicEventSubscriber(this.taskViewStore, subscriber)
+      )
       return await super.runAgent(
         { ...parameters, abortController: requestController },
         guardedSubscriber
@@ -84,6 +92,21 @@ export class RuntimeHttpAgent extends HttpAgent {
         signal.removeEventListener('abort', listener)
       )
     }
+  }
+}
+
+function publicEventSubscriber(
+  store: AgentTaskViewStore,
+  subscriber?: AgentSubscriber
+): AgentSubscriber {
+  return {
+    ...subscriber,
+    onCustomEvent: (params) => {
+      if (params.event.name === OA_PUBLIC_AGENT_EVENT) {
+        store.accept(params.event.value)
+      }
+      return subscriber?.onCustomEvent?.(params)
+    },
   }
 }
 
@@ -171,9 +194,12 @@ function terminalGuard(
         ...params,
         error: new Error(AGENT_RUN_INCOMPLETE_MESSAGE),
       })
-      return Promise.all([progressStart, progressContent, progressEnd, runFailed]).then(
-        () => undefined
-      )
+      return Promise.all([
+        progressStart,
+        progressContent,
+        progressEnd,
+        runFailed,
+      ]).then(() => undefined)
     },
   }
 }
