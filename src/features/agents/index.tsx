@@ -61,6 +61,7 @@ import {
 import { RuntimeHttpAgent } from './runtime-http-agent'
 import { AgentToolFallback, AgentToolGroup } from './tool-ui'
 import type { AgentId, ConversationSummary } from './types'
+import { AgentUnderstandingCard } from './understanding-card'
 
 type RefreshOptions = {
   keepSelection?: boolean
@@ -570,15 +571,20 @@ function AgentThread({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread
-        components={{
-          Reasoning: AgentExecutionProgress,
-          ReasoningGroup: AgentExecutionProgressGroup,
-          ToolFallback: AgentToolFallback,
-          ToolGroup: AgentToolGroup,
-        }}
-        quickActions={quickActions}
-      />
+      <div className='flex h-full min-h-0 flex-col'>
+        <AgentUnderstandingCard store={agent.taskViewStore} />
+        <div className='min-h-0 flex-1'>
+          <Thread
+            components={{
+              Reasoning: AgentExecutionProgress,
+              ReasoningGroup: AgentExecutionProgressGroup,
+              ToolFallback: AgentToolFallback,
+              ToolGroup: AgentToolGroup,
+            }}
+            quickActions={quickActions}
+          />
+        </div>
+      </div>
     </AssistantRuntimeProvider>
   )
 }
