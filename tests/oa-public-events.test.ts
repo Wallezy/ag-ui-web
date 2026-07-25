@@ -88,6 +88,22 @@ test('rebuilds steps and repairs while guarding terminal state', () => {
   assert.equal(store.getSnapshot(), terminal)
 })
 
+test('rebuilds the same repair timeline from replayed reconnect events', () => {
+  const frames = [
+    event('understanding'),
+    event('state', 1, 'OA_TASK_STATE_UPDATED'),
+    event('plan', 1, 'OA_PLAN_CREATED'),
+    event('step', 1, 'OA_STEP_STARTED', { stepId: 'step-1' }),
+    event('observed', 1, 'OA_OBSERVATION_RECEIVED', { stepId: 'step-1' }),
+    event('repair', 1, 'OA_REPAIR_TRIGGERED', { stepId: 'step-1', action: 'SAFE_PROBE' }),
+  ]
+  const first = new AgentTaskViewStore()
+  const reconnected = new AgentTaskViewStore()
+  frames.forEach((frame) => first.accept(frame))
+  ;[...frames, frames[4]!, frames[5]!].forEach((frame) => reconnected.accept(frame))
+  assert.deepEqual(reconnected.getSnapshot().repairs, first.getSnapshot().repairs)
+})
+
 function event(
   eventId: string,
   taskVersion = 1,

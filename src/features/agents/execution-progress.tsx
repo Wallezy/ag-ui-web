@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { ReasoningMessagePartComponent } from '@assistant-ui/react'
 import {
   CheckCircle2,
@@ -8,10 +8,18 @@ import {
   MousePointerClick,
   ShieldCheck,
   XCircle,
+  ChevronDown,
+  RotateCcw,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import {
   parseExecutionProgress,
+  recoveredExecutionAttempts,
   type ExecutionProgressUpdate,
   visibleExecutionProgress,
 } from './execution-progress-data'
@@ -19,7 +27,9 @@ import {
 export const AgentExecutionProgress: ReasoningMessagePartComponent = ({
   text,
 }) => {
-  const steps = visibleExecutionProgress(parseExecutionProgress(text))
+  const parsed = parseExecutionProgress(text)
+  const steps = visibleExecutionProgress(parsed)
+  const recovered = recoveredExecutionAttempts(parsed)
   if (!steps.length) return null
 
   const isRunning = steps.some((step) => step.status === 'running')
@@ -77,7 +87,37 @@ export const AgentExecutionProgress: ReasoningMessagePartComponent = ({
           </li>
         ))}
       </ol>
+      {recovered.length ? <RecoveredAttempts attempts={recovered} /> : null}
     </section>
+  )
+}
+
+function RecoveredAttempts({
+  attempts,
+}: {
+  attempts: ReturnType<typeof recoveredExecutionAttempts>
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className='mt-1'>
+      <CollapsibleTrigger className='text-muted-foreground hover:text-foreground flex items-center gap-1.5 text-xs'>
+        <RotateCcw className='size-3.5' />
+        已自动修正 {attempts.length} 次
+        <ChevronDown
+          className={cn('size-3.5 transition-transform', !open && '-rotate-90')}
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <ul className='text-muted-foreground mt-1 grid gap-1 border-l pl-3 text-xs'>
+          {attempts.map((attempt) => (
+            <li key={attempt.stepId}>
+              {attempt.title}
+              {attempt.detail ? `：${attempt.detail}` : ''}
+            </li>
+          ))}
+        </ul>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 

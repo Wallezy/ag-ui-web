@@ -59,6 +59,7 @@ import {
   AgentExecutionProgress,
   AgentExecutionProgressGroup,
 } from './execution-progress'
+import { AgentRepairTimeline } from './repair-timeline'
 import { RuntimeHttpAgent } from './runtime-http-agent'
 import { AgentToolFallback, AgentToolGroup } from './tool-ui'
 import type { AgentId, ConversationSummary } from './types'
@@ -575,6 +576,7 @@ function AgentThread({
       <div className='flex h-full min-h-0 flex-col'>
         <AgentUnderstandingCard store={agent.taskViewStore} agent={agent} />
         <AgentClarificationCard agent={agent} />
+        <AgentRepairTimeline store={agent.taskViewStore} />
         <div className='min-h-0 flex-1'>
           <Thread
             components={{

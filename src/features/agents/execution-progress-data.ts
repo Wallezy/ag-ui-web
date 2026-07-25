@@ -19,6 +19,12 @@ type ExecutionProgressStep = ExecutionProgressUpdate & {
   firstSequence: number
 }
 
+export type RecoveredExecutionAttempt = {
+  stepId: string
+  title: string
+  detail: string
+}
+
 export function parseExecutionProgress(text: string): ExecutionProgressStep[] {
   const steps = new Map<string, ExecutionProgressStep>()
 
@@ -52,6 +58,22 @@ export function visibleExecutionProgress(
     }
     return true
   })
+}
+
+export function recoveredExecutionAttempts(
+  steps: ExecutionProgressStep[]
+): RecoveredExecutionAttempt[] {
+  const recovered = recoveredToolAttempts(steps)
+  return steps
+    .filter(
+      (step) =>
+        step.status === 'failed' && recovered.has(toolAttemptId(step.stepId))
+    )
+    .map((step) => ({
+      stepId: step.stepId,
+      title: step.title,
+      detail: step.detail,
+    }))
 }
 
 function recoveredToolAttempts(steps: ExecutionProgressStep[]) {

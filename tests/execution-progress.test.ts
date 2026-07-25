@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   parseExecutionProgress,
+  recoveredExecutionAttempts,
   visibleExecutionProgress,
 } from '../src/features/agents/execution-progress-data.ts'
 import { visibleToolGroupPositions } from '../src/features/agents/tool-retry-data.ts'
@@ -191,6 +192,16 @@ test('hides a failed tool attempt after the same operation succeeds on retry', (
   )
 })
 
+test('keeps recovered v1 failures as a public repair summary', () => {
+  const parsed = parseExecutionProgress([
+    progressLine('tool:first', 'tool', 'failed', '查询 OA 工作项失败', 1, '暂时不可用'),
+    progressLine('tool:retry', 'tool', 'completed', '查询 OA 工作项已完成', 2),
+  ].join('\n'))
+  assert.deepEqual(recoveredExecutionAttempts(parsed), [{
+    stepId: 'tool:first', title: '查询 OA 工作项失败', detail: '暂时不可用',
+  }])
+})
+
 test('keeps a failed tool attempt when no later retry succeeds', () => {
   const steps = visibleExecutionProgress(
     parseExecutionProgress(
@@ -275,7 +286,8 @@ function progressLine(
     | 'waiting_user'
     | 'waiting_confirmation',
   title: string,
-  sequence: number
+  sequence: number,
+  detail = ''
 ) {
   return JSON.stringify({
     kind: 'execution_progress',
@@ -283,7 +295,7 @@ function progressLine(
     phase,
     status,
     title,
-    detail: '',
+    detail,
     sequence,
   })
 }
