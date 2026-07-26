@@ -93,6 +93,10 @@ export class RuntimeHttpAgent extends HttpAgent {
   ) {
     await previousRun?.catch(() => undefined)
 
+    if (parameters?.runId) {
+      this.taskViewStore.beginRun(parameters.runId)
+    }
+
     const requestController = new AbortController()
     const sourceSignals = [
       runtimeOptions?.signal,

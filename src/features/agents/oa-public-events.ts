@@ -44,6 +44,7 @@ export type OaPublicAgentEvent = {
   schemaVersion: 2 | 3
   eventId: string
   traceId: string
+  runId?: string
   taskId: string
   taskVersion: number
   eventType: OaPublicEventType
@@ -68,6 +69,7 @@ export type AgentTaskRepair = {
 }
 
 export type AgentTaskViewState = {
+  activeRunId: string | null
   traceId: string | null
   taskId: string | null
   taskVersion: number
@@ -83,6 +85,7 @@ export type AgentTaskViewState = {
 }
 
 export const initialAgentTaskViewState: AgentTaskViewState = {
+  activeRunId: null,
   traceId: null,
   taskId: null,
   taskVersion: -1,
@@ -134,6 +137,7 @@ export function parseOaPublicAgentEvent(
   if (
     !isIdentifier(value.eventId) ||
     !isIdentifier(value.traceId) ||
+    (value.runId !== undefined && !isIdentifier(value.runId)) ||
     !isIdentifier(value.taskId) ||
     !Number.isSafeInteger(value.taskVersion) ||
     (value.taskVersion as number) < 0 ||
@@ -152,8 +156,15 @@ export function reduceAgentTaskViewState(
   current: AgentTaskViewState,
   event: OaPublicAgentEvent
 ): AgentTaskViewState {
+  if (
+    current.activeRunId !== null &&
+    event.runId !== undefined &&
+    event.runId !== current.activeRunId
+  ) {
+    return current
+  }
   const newTask = current.taskId !== null && current.taskId !== event.taskId
-  const base = newTask ? initialAgentTaskViewState : current
+  const base = newTask ? emptyAgentTaskViewState(current.activeRunId) : current
   if (base.eventIds.has(event.eventId)) return base
   if (event.taskVersion < base.taskVersion) return base
   if (
@@ -168,6 +179,7 @@ export function reduceAgentTaskViewState(
   eventIds.add(event.eventId)
   const next: AgentTaskViewState = {
     ...base,
+    activeRunId: event.runId ?? base.activeRunId,
     traceId: event.traceId,
     taskId: event.taskId,
     taskVersion: event.taskVersion,
@@ -251,11 +263,26 @@ export class AgentTaskViewStore {
     return true
   }
 
+  beginRun(runId: string) {
+    if (!isIdentifier(runId)) return false
+    this.state = emptyAgentTaskViewState(runId)
+    this.listeners.forEach((listener) => listener())
+    return true
+  }
+
   invalidate() {
     if (this.state === initialAgentTaskViewState) return false
     this.state = initialAgentTaskViewState
     this.listeners.forEach((listener) => listener())
     return true
+  }
+}
+
+function emptyAgentTaskViewState(activeRunId: string | null) {
+  return {
+    ...initialAgentTaskViewState,
+    activeRunId,
+    eventIds: new Set<string>(),
   }
 }
 

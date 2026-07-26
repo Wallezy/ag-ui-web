@@ -52,7 +52,32 @@ const INTENT_LABELS: Readonly<Record<string, string>> = {
 export function understandingCardModel(
   state: AgentTaskViewState
 ): UnderstandingCardModel | null {
+  if (state.activeRunId && !state.understanding) {
+    return {
+      operation: '正在理解当前请求…',
+      fields: [],
+      writePreview: false,
+      waitingConfirmation: false,
+    }
+  }
   if (!state.v2Observed || !state.understanding) return null
+  if (state.pending && state.pending.questionKind !== 'WRITE_CONFIRMATION') {
+    return {
+      operation: '需要补充信息',
+      fields: (state.pending.fields ?? [])
+        .filter((name) => PUBLIC_FIELD_NAMES.has(name))
+        .map((name) => ({
+          name,
+          label: FIELD_LABELS[name]!,
+          valueSummary: null,
+          source: null,
+          status: '需要确认',
+          editable: false,
+        })),
+      writePreview: false,
+      waitingConfirmation: false,
+    }
+  }
   const intentId = state.understanding.selectedIntentId ?? 'UNKNOWN'
   const status = publicFieldStatus(state.understanding.status)
   const fields = state.understanding.slots

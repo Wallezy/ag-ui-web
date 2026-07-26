@@ -12,11 +12,11 @@ import {
 test('pins the shared v3 contract hashes', () => {
   assert.equal(
     sha256('contracts/oa-public-agent-event-v3.schema.json'),
-    '7c5b11fca5525ea72aeed6dd6b1eec8d5e8f63f03863a83538d86708da239ba2'
+    'c116296d2ee940c057daa8996aea95371a1fcd09779e4a17f386a1d93ae17517'
   )
   assert.equal(
     sha256('contracts/fixtures/oa-public-agent-event-v3.json'),
-    '913ca1005da7893010cf9a1a7f2c929b3db8c3e6dcbb7c886ce40b087dc09c51'
+    'c06f0677e2e39e2fef397275d08f659a6e10e24a86f23d78213566951ea8f265'
   )
 })
 
@@ -139,6 +139,31 @@ test('rebuilds the same repair timeline from replayed reconnect events', () => {
   assert.deepEqual(reconnected.getSnapshot().repairs, first.getSnapshot().repairs)
 })
 
+test('clears the stale task projection when a new run starts', () => {
+  const store = new AgentTaskViewStore()
+  store.accept(event('old-understanding', 5, 'OA_UNDERSTANDING_READY', {
+    selectedIntentId: 'WORK_HOUR_PREPARE',
+  }))
+  store.accept(event('old-complete', 5, 'OA_VERIFICATION_COMPLETED', {
+    status: 'COMPLETE',
+  }))
+
+  assert.equal(store.beginRun('run-current'), true)
+  assert.equal(store.getSnapshot().activeRunId, 'run-current')
+  assert.equal(store.getSnapshot().understanding, null)
+  assert.equal(store.getSnapshot().terminal, null)
+})
+
+test('ignores late events from an old run and accepts the same task version from the current run', () => {
+  const store = new AgentTaskViewStore()
+  store.beginRun('run-current')
+
+  assert.equal(store.accept({ ...event('late', 5), runId: 'run-old' }), false)
+  assert.equal(store.getSnapshot().understanding, null)
+  assert.equal(store.accept({ ...event('current', 5), runId: 'run-current' }), true)
+  assert.equal(store.getSnapshot().taskVersion, 5)
+})
+
 function event(
   eventId: string,
   taskVersion = 1,
@@ -150,6 +175,7 @@ function event(
     schemaVersion,
     eventId,
     traceId: 'trace-1',
+    ...(schemaVersion === 3 ? { runId: 'run-1' } : {}),
     taskId: 'task-1',
     taskVersion,
     eventType,

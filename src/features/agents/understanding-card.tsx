@@ -69,19 +69,21 @@ export function AgentUnderstandingCard({
                 {model.waitingConfirmation ? '等待确认' : '仅生成预览'}
               </span>
             ) : null}
-            <CollapsibleTrigger
-              className='hover:bg-muted focus-visible:ring-ring inline-flex size-7 shrink-0 items-center justify-center rounded-sm focus-visible:ring-2 focus-visible:outline-none'
-              aria-label={open ? '收起我的理解' : '展开我的理解'}
-            >
-              <ChevronDown
-                className={cn(
-                  'size-4 transition-transform',
-                  !open && '-rotate-90'
-                )}
-              />
-            </CollapsibleTrigger>
+            {model.fields.length ? (
+              <CollapsibleTrigger
+                className='hover:bg-muted focus-visible:ring-ring inline-flex size-7 shrink-0 items-center justify-center rounded-sm focus-visible:ring-2 focus-visible:outline-none'
+                aria-label={open ? '收起我的理解' : '展开我的理解'}
+              >
+                <ChevronDown
+                  className={cn(
+                    'size-4 transition-transform',
+                    !open && '-rotate-90'
+                  )}
+                />
+              </CollapsibleTrigger>
+            ) : null}
           </div>
-          <CollapsibleContent>
+          <CollapsibleContent hidden={!model.fields.length}>
             <dl className='mt-2 grid grid-cols-1 gap-x-5 gap-y-1.5 border-t pt-2 sm:grid-cols-2'>
               {model.fields.map((field) => (
                 <UnderstandingFieldEditor

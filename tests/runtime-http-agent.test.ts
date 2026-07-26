@@ -8,6 +8,22 @@ import {
   TASK_DELTA_UNKNOWN_RESULT_MESSAGE,
 } from '../src/features/agents/runtime-http-agent.ts'
 
+const oldUnderstandingEvent = {
+  schemaVersion: 3,
+  eventId: 'old-understanding',
+  traceId: 'trace-old',
+  taskId: 'task-work-hour-prepare',
+  taskVersion: 5,
+  eventType: 'OA_UNDERSTANDING_READY',
+  occurredAt: '2026-07-25T12:00:00Z',
+  payload: {
+    reasonCode: 'PUBLIC_REASON',
+    displayMessage: '准备登记工时',
+    status: 'COMPLETE',
+    selectedIntentId: 'WORK_HOUR_PREPARE',
+  },
+}
+
 const input: RunAgentParameters = {
   threadId: 'conversation-1',
   runId: 'run-1',
@@ -127,6 +143,23 @@ test('preserves normal finalization when the stream includes RUN_FINISHED', asyn
   assert.equal(finished, 1)
   assert.equal(finalized, 1)
   assert.equal(failed, 0)
+})
+
+test('clears old understanding when an ordinary new run starts', async () => {
+  const agent = new RuntimeHttpAgent({
+    url: 'http://agent.test/api/agent/ag-ui',
+    fetch: async () =>
+      sseResponse(
+        { type: 'RUN_STARTED', threadId: 'conversation-1', runId: 'run-current' },
+        { type: 'RUN_FINISHED', threadId: 'conversation-1', runId: 'run-current' }
+      ),
+  })
+  agent.taskViewStore.accept(oldUnderstandingEvent)
+
+  await agent.runAgent({ ...input, runId: 'run-current' })
+
+  assert.equal(agent.taskViewStore.getSnapshot().activeRunId, 'run-current')
+  assert.equal(agent.taskViewStore.getSnapshot().understanding, null)
 })
 
 test('bridges an explicit RUN_ERROR to subscribers without a run-error handler', async () => {

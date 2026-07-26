@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Info, LoaderCircle, RefreshCw } from 'lucide-react'
+import { Copy, Info, LoaderCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -111,6 +111,7 @@ export function DevelopmentDiagnostics({
             <DiagnosticRow
               label='traceId'
               value={task.traceId ?? '当前会话暂无'}
+              copyable={task.traceId !== null}
             />
             <DiagnosticRow
               label='taskId'
@@ -131,11 +132,32 @@ export function DevelopmentDiagnostics({
   )
 }
 
-function DiagnosticRow({ label, value }: { label: string; value: string }) {
+function DiagnosticRow({
+  label,
+  value,
+  copyable = false,
+}: {
+  label: string
+  value: string
+  copyable?: boolean
+}) {
   return (
     <>
       <dt className='text-muted-foreground'>{label}</dt>
-      <dd className='min-w-0 font-mono text-xs break-all'>{value}</dd>
+      <dd className='flex min-w-0 items-start gap-1 font-mono text-xs break-all'>
+        <span className='min-w-0 flex-1'>{value}</span>
+        {copyable ? (
+          <button
+            type='button'
+            className='hover:bg-muted focus-visible:ring-ring inline-flex size-6 shrink-0 items-center justify-center rounded-sm focus-visible:ring-2 focus-visible:outline-none'
+            aria-label={`复制${label}`}
+            title={`复制${label}`}
+            onClick={() => void navigator.clipboard.writeText(value)}
+          >
+            <Copy className='size-3.5' />
+          </button>
+        ) : null}
+      </dd>
     </>
   )
 }

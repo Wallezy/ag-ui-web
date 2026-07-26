@@ -10,6 +10,39 @@ test('does not render an empty shell without a v2 understanding event', () => {
   assert.equal(understandingCardModel(initialAgentTaskViewState), null)
 })
 
+test('shows a current-run placeholder before the first understanding event', () => {
+  const model = understandingCardModel({
+    ...initialAgentTaskViewState,
+    activeRunId: 'run-current',
+  })
+
+  assert.equal(model?.operation, '正在理解当前请求…')
+  assert.deepEqual(model?.fields, [])
+  assert.equal(model?.writePreview, false)
+})
+
+test('shows structured pending fields instead of an old write preview', () => {
+  const current = state({
+    selectedIntentId: 'WORK_HOUR_PREPARE',
+    fields: ['workDate'],
+  })
+  const model = understandingCardModel({
+    ...current,
+    terminal: 'waiting_user',
+    pending: {
+      reasonCode: 'PERIOD_REQUIRED',
+      displayMessage: '请补充日期',
+      questionId: 'question-1',
+      questionKind: 'SEMANTIC_CLARIFICATION',
+      fields: ['period'],
+    },
+  })
+
+  assert.equal(model?.operation, '需要补充信息')
+  assert.equal(model?.writePreview, false)
+  assert.deepEqual(model?.fields.map((field) => field.label), ['日期'])
+})
+
 test('maps only public server fields and status labels', () => {
   const model = understandingCardModel(
     state({

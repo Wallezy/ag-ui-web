@@ -3,11 +3,12 @@
   "$id": "https://rockycore.cn/contracts/oa-public-agent-event-v3.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "eventId", "traceId", "taskId", "taskVersion", "eventType", "occurredAt", "payload"],
+  "required": ["schemaVersion", "eventId", "traceId", "runId", "taskId", "taskVersion", "eventType", "occurredAt", "payload"],
   "properties": {
     "schemaVersion": { "const": 3 },
     "eventId": { "$ref": "#/$defs/identifier" },
     "traceId": { "$ref": "#/$defs/identifier" },
+    "runId": { "$ref": "#/$defs/identifier" },
     "taskId": { "$ref": "#/$defs/identifier" },
     "taskVersion": { "type": "integer", "minimum": 0 },
     "eventType": { "type": "string", "pattern": "^OA_[A-Z_]+$" },
