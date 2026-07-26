@@ -31,6 +31,14 @@ test('maps only public server fields and status labels', () => {
   })
 })
 
+test('localizes the legacy work-item operation id emitted by public events', () => {
+  const model = understandingCardModel(
+    state({ selectedIntentId: 'QUERY_WORK_ITEMS', fields: [] })
+  )
+
+  assert.equal(model?.operation, '查询工作项')
+})
+
 test('uses authoritative v3 values, status and editability', () => {
   const model = understandingCardModel(state({
     selectedIntentId: 'WORK_ITEM_QUERY',
@@ -42,9 +50,39 @@ test('uses authoritative v3 values, status and editability', () => {
   }))
 
   assert.deepEqual(model?.fields[0], {
-    name: 'assigneeName', label: '成员', valueSummary: '王翔',
+    name: 'assigneeName', label: '人员', valueSummary: '王翔',
     source: 'USER_CORRECTION', status: '系统验证', editable: true,
   })
+})
+
+test('hides internal slots and unknown public statuses by default', () => {
+  const model = understandingCardModel(state({
+    selectedIntentId: 'WORK_ITEM_QUERY',
+    slots: [
+      {
+        name: 'goal', label: '操作', valueSummary: 'QUERY_WORK_ITEMS',
+        source: 'DEFAULT', status: 'EXPLICIT', critical: false,
+        editable: true, conflictReason: '',
+      },
+      {
+        name: 'semanticWorkItemReview', label: 'semanticWorkItemReview',
+        valueSummary: 'UNAVAILABLE', source: 'DEFAULT', status: 'EXPLICIT',
+        critical: false, editable: false, conflictReason: '',
+      },
+      {
+        name: 'assigneeName', label: '人员', valueSummary: '李文卓',
+        source: 'EXPLICIT_CURRENT_TURN', status: 'UNAVAILABLE', critical: true,
+        editable: true, conflictReason: '',
+      },
+      {
+        name: 'statusList', label: '状态', valueSummary: '进行中',
+        source: 'EXPLICIT_CURRENT_TURN', status: 'EXPLICIT', critical: false,
+        editable: false, conflictReason: '',
+      },
+    ],
+  }))
+
+  assert.deepEqual(model?.fields.map((field) => field.name), ['statusList'])
 })
 
 test('keeps write operations behind a visible preview and confirmation boundary', () => {

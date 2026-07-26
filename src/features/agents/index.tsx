@@ -15,6 +15,8 @@ import {
   LogIn,
   LogOut,
   MessageSquarePlus,
+  PanelLeftClose,
+  PanelLeftOpen,
   RefreshCw,
   ShieldAlert,
   Trash2,
@@ -124,6 +126,7 @@ export function AgentWorkspace({
   const [oaSessionCheckVersion, setOaSessionCheckVersion] = useState(0)
   const [taskDiagnostics, setTaskDiagnostics] =
     useState<CurrentTaskDiagnostics>(EMPTY_TASK_DIAGNOSTICS)
+  const [historyCollapsed, setHistoryCollapsed] = useState(false)
   const refreshTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
     null
   )
@@ -420,10 +423,32 @@ export function AgentWorkspace({
       </Dialog>
 
       <Main fixed fluid className='p-0'>
-        <div className='grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[18rem_minmax(0,1fr)]'>
+        <div
+          className={cn(
+            'grid min-h-0 flex-1 grid-cols-1',
+            historyCollapsed
+              ? 'md:grid-cols-[3.5rem_minmax(0,1fr)]'
+              : 'md:grid-cols-[16rem_minmax(0,1fr)]'
+          )}
+        >
           <aside className='bg-sidebar/60 hidden min-h-0 border-e md:flex md:flex-col'>
-            <div className='flex h-14 items-center gap-2 px-4'>
-              <div className='min-w-0 flex-1'>
+            <div
+              className={cn(
+                'flex h-14 items-center gap-1.5',
+                historyCollapsed ? 'justify-center px-2' : 'px-3'
+              )}
+            >
+              <Button
+                size='icon'
+                variant='ghost'
+                aria-label={historyCollapsed ? '展开历史会话' : '收起历史会话'}
+                onClick={() => setHistoryCollapsed((current) => !current)}
+              >
+                {historyCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+              </Button>
+              <div
+                className={cn('min-w-0 flex-1', historyCollapsed && 'hidden')}
+              >
                 <div className='truncate text-sm font-medium'>历史会话</div>
                 <div className='text-muted-foreground truncate text-xs'>
                   后端会话
@@ -433,6 +458,7 @@ export function AgentWorkspace({
                 size='icon'
                 variant='ghost'
                 aria-label='清空历史会话'
+                className={cn(historyCollapsed && 'hidden')}
                 disabled={
                   isClearingConversations ||
                   isLoadingConversations ||
@@ -451,6 +477,7 @@ export function AgentWorkspace({
                 size='icon'
                 variant='ghost'
                 aria-label='新建会话'
+                className={cn(historyCollapsed && 'hidden')}
                 disabled={
                   isCreatingConversation ||
                   (requiresOaSession && oaSessionState !== 'ready')
@@ -464,8 +491,13 @@ export function AgentWorkspace({
                 )}
               </Button>
             </div>
-            <Separator />
-            <div className='min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto'>
+            <Separator className={cn(historyCollapsed && 'hidden')} />
+            <div
+              className={cn(
+                'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto',
+                historyCollapsed && 'hidden'
+              )}
+            >
               <div className='flex w-full min-w-0 flex-col gap-1 p-2'>
                 {conversationError ? (
                   <div className='text-destructive px-3 py-2 text-xs'>
@@ -481,7 +513,6 @@ export function AgentWorkspace({
                       key={conversation.id}
                       conversation={conversation}
                       active={activeConversationId === conversation.id}
-                      agent={agentById(conversation.agentId)}
                       deleting={deletingConversationIds.has(conversation.id)}
                       onClick={() => setActiveConversationId(conversation.id)}
                       onDelete={() =>
@@ -610,7 +641,7 @@ function AgentThread({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <div className='flex h-full min-h-0 flex-col'>
+      <div className='flex h-full min-h-0 flex-col [--agent-reading-max-width:56rem] [--agent-shell-max-width:72rem]'>
         <AgentUnderstandingCard store={agent.taskViewStore} agent={agent} />
         <AgentClarificationCard agent={agent} />
         <AgentRepairTimeline store={agent.taskViewStore} />
@@ -633,14 +664,12 @@ function AgentThread({
 function ConversationButton({
   conversation,
   active,
-  agent,
   deleting,
   onClick,
   onDelete,
 }: {
   conversation: ConversationSummary
   active: boolean
-  agent: AgentConfig
   deleting: boolean
   onClick: () => void
   onDelete: () => void
@@ -651,7 +680,7 @@ function ConversationButton({
         type='button'
         onClick={onClick}
         className={cn(
-          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground flex w-full flex-col gap-2 rounded-md py-2 ps-3 pe-10 text-start transition-colors',
+          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground flex w-full flex-col gap-1 rounded-md py-2 ps-3 pe-10 text-start transition-colors',
           active && 'bg-sidebar-accent text-sidebar-accent-foreground'
         )}
       >
@@ -669,16 +698,13 @@ function ConversationButton({
         <div className='text-muted-foreground line-clamp-2 text-xs'>
           {conversation.lastMessage}
         </div>
-        <div className='flex items-center gap-2'>
-          <Badge variant='secondary' className='w-fit'>
-            {agent.badge}
-          </Badge>
-          {conversation.status === 'running' ? (
+        {conversation.status === 'running' ? (
+          <div className='flex items-center gap-2'>
             <Badge variant='outline' className='w-fit'>
               运行中
             </Badge>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </button>
       <Button
         type='button'

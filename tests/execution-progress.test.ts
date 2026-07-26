@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   parseExecutionProgress,
+  executionProgressPresentation,
   recoveredExecutionAttempts,
   visibleExecutionProgress,
 } from '../src/features/agents/execution-progress-data.ts'
@@ -82,6 +83,28 @@ test('accepts planning, observation, and user waiting terminal states', () => {
       { phase: 'response', status: 'waiting_confirmation' },
     ]
   )
+})
+
+test('collapses completed progress while keeping waiting and failures expanded', () => {
+  const completed = parseExecutionProgress(
+    progressLine('response', 'response', 'completed', '处理完成', 1)
+  )
+  const waiting = parseExecutionProgress(
+    progressLine('response', 'response', 'waiting_user', '需要补充信息', 1)
+  )
+  const failed = parseExecutionProgress(
+    progressLine('routing', 'routing', 'failed', '业务执行路径未建立', 1)
+  )
+
+  assert.equal(executionProgressPresentation(completed).defaultExpanded, false)
+  assert.deepEqual(executionProgressPresentation(waiting), {
+    isRunning: false,
+    isWaiting: true,
+    hasFailed: false,
+    defaultExpanded: true,
+    label: '等待你的操作',
+  })
+  assert.equal(executionProgressPresentation(failed).defaultExpanded, true)
 })
 
 test('shows the complete safe decision and execution trace', () => {

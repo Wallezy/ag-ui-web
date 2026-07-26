@@ -1,4 +1,9 @@
-import { useState, useSyncExternalStore, type FormEvent } from 'react'
+import {
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+} from 'react'
 import { useThreadRuntime } from '@assistant-ui/react'
 import {
   ChevronDown,
@@ -30,21 +35,34 @@ export function AgentUnderstandingCard({
   const thread = useThreadRuntime()
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const model = understandingCardModel(state)
-  const [open, setOpen] = useState(true)
+  const shouldExpand =
+    state.terminal === 'waiting_user' ||
+    state.terminal === 'failed' ||
+    state.understanding?.status === 'WAITING_CONFIRMATION'
+  const [open, setOpen] = useState(shouldExpand)
+  useEffect(() => {
+    setOpen(shouldExpand)
+  }, [shouldExpand, state.taskId, state.taskVersion])
   if (!model) return null
 
+  const summary = [
+    model.operation,
+    ...model.fields
+      .filter((field) => field.valueSummary)
+      .slice(0, 4)
+      .map((field) => `${field.label} ${field.valueSummary}`),
+  ].join(' · ')
+
   return (
-    <div className='border-border/80 bg-background shrink-0 border-b px-4 py-2.5 sm:px-6'>
+    <div className='border-border/80 bg-background shrink-0 border-b px-4 py-2 sm:px-6'>
       <Collapsible open={open} onOpenChange={setOpen}>
-        <div className='bg-card mx-auto max-w-3xl rounded-md border px-3 py-2.5 shadow-xs'>
+        <div className='bg-card mx-auto w-full max-w-(--agent-shell-max-width) rounded-md border px-3 py-2 shadow-xs'>
           <div className='flex min-w-0 items-center gap-2'>
             <ListChecks className='text-primary size-4 shrink-0' />
-            <div className='min-w-0 flex-1'>
-              <div className='text-xs font-semibold'>我的理解</div>
-              <div className='text-muted-foreground truncate text-xs'>
-                {model.operation}
-              </div>
-            </div>
+            <span className='shrink-0 text-xs font-semibold'>我的理解</span>
+            <span className='text-muted-foreground min-w-0 flex-1 truncate text-xs'>
+              {summary}
+            </span>
             {model.writePreview ? (
               <span className='inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-400'>
                 <FileCheck2 className='size-3.5' />
@@ -65,10 +83,6 @@ export function AgentUnderstandingCard({
           </div>
           <CollapsibleContent>
             <dl className='mt-2 grid grid-cols-1 gap-x-5 gap-y-1.5 border-t pt-2 sm:grid-cols-2'>
-              <div className='flex min-w-0 items-center justify-between gap-3 text-xs'>
-                <dt className='text-muted-foreground'>操作</dt>
-                <dd className='truncate font-medium'>{model.operation}</dd>
-              </div>
               {model.fields.map((field) => (
                 <UnderstandingFieldEditor
                   key={field.name}

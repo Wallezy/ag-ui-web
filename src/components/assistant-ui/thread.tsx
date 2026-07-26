@@ -124,7 +124,9 @@ const ThreadRoot: FC<{
     <ThreadPrimitive.Root
       className='aui-root aui-thread-root bg-background @container flex h-full flex-col'
       style={{
-        ['--thread-max-width' as string]: '56rem',
+        ['--thread-max-width' as string]: 'var(--agent-shell-max-width, 72rem)',
+        ['--thread-reading-max-width' as string]:
+          'var(--agent-reading-max-width, 56rem)',
         ['--composer-bg' as string]:
           'color-mix(in oklab, var(--color-muted) 30%, var(--color-background))',
         ['--composer-radius' as string]: '1.5rem',
@@ -148,7 +150,7 @@ const ThreadRoot: FC<{
 
           <div
             data-slot='aui_message-group'
-            className='mb-14 flex flex-col gap-y-6 empty:hidden'
+            className='mx-auto mb-10 flex w-full max-w-(--thread-reading-max-width) flex-col gap-y-5 empty:hidden'
           >
             <ThreadPrimitive.Messages>
               {() => <ThreadMessage />}
@@ -163,14 +165,16 @@ const ThreadRoot: FC<{
             )}
           >
             <ThreadScrollToBottom />
-            <Composer />
-            {hasQuickActions ? (
-              <ThreadQuickActionsSlot actions={quickActions} />
-            ) : (
-              <AuiIf condition={isNewChatView}>
-                <ThreadSuggestionsSlot />
-              </AuiIf>
-            )}
+            <div className='mx-auto flex w-full max-w-(--thread-reading-max-width) flex-col gap-2'>
+              <Composer />
+              {hasQuickActions ? (
+                <ThreadQuickActionsSlot actions={quickActions} />
+              ) : (
+                <AuiIf condition={isNewChatView}>
+                  <ThreadSuggestionsSlot />
+                </AuiIf>
+              )}
+            </div>
           </ThreadPrimitive.ViewportFooter>
         </div>
       </ThreadPrimitive.Viewport>
@@ -299,11 +303,11 @@ const Composer: FC = () => {
     <ComposerPrimitive.Root className='aui-composer-root relative flex w-full flex-col'>
       <div
         data-slot='aui_composer-shell'
-        className='border-border/60 focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex w-full flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] dark:shadow-none'
+        className='border-border/60 focus-within:border-border dark:border-muted-foreground/15 dark:focus-within:border-muted-foreground/30 flex min-h-13 w-full items-end gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) shadow-[0_4px_16px_-8px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] transition-[border-color,box-shadow] focus-within:shadow-[0_6px_24px_-8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.05)] dark:shadow-none'
       >
         <ComposerPrimitive.Input
-          placeholder='Send a message...'
-          className='aui-composer-input caret-primary placeholder:text-muted-foreground/80 max-h-32 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base outline-none'
+          placeholder='输入消息…'
+          className='aui-composer-input caret-primary placeholder:text-muted-foreground/80 max-h-28 min-h-9 flex-1 resize-none bg-transparent px-2.5 py-1.5 text-base outline-none'
           rows={1}
           autoFocus
           enterKeyHint='send'

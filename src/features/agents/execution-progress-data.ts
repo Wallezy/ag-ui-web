@@ -25,6 +25,38 @@ export type RecoveredExecutionAttempt = {
   detail: string
 }
 
+export type ExecutionProgressPresentation = {
+  isRunning: boolean
+  isWaiting: boolean
+  hasFailed: boolean
+  defaultExpanded: boolean
+  label: string
+}
+
+export function executionProgressPresentation(
+  steps: readonly ExecutionProgressUpdate[]
+): ExecutionProgressPresentation {
+  const isRunning = steps.some((step) => step.status === 'running')
+  const isWaiting = steps.some(
+    (step) =>
+      step.status === 'waiting_user' || step.status === 'waiting_confirmation'
+  )
+  const hasFailed = steps.some((step) => step.status === 'failed')
+  return {
+    isRunning,
+    isWaiting,
+    hasFailed,
+    defaultExpanded: isRunning || isWaiting || hasFailed,
+    label: isRunning
+      ? '决策与执行中'
+      : isWaiting
+        ? '等待你的操作'
+        : hasFailed
+          ? '执行与决策未完成'
+          : '执行与决策已结束',
+  }
+}
+
 export function parseExecutionProgress(text: string): ExecutionProgressStep[] {
   const steps = new Map<string, ExecutionProgressStep>()
 

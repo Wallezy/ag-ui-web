@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { ReasoningMessagePartComponent } from '@assistant-ui/react'
 import {
   CheckCircle2,
@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/collapsible'
 import {
   parseExecutionProgress,
+  executionProgressPresentation,
   recoveredExecutionAttempts,
   type ExecutionProgressUpdate,
   visibleExecutionProgress,
@@ -30,65 +31,77 @@ export const AgentExecutionProgress: ReasoningMessagePartComponent = ({
   const parsed = parseExecutionProgress(text)
   const steps = visibleExecutionProgress(parsed)
   const recovered = recoveredExecutionAttempts(parsed)
+  const { isRunning, isWaiting, hasFailed, label, defaultExpanded } =
+    executionProgressPresentation(steps)
+  const shouldExpand = defaultExpanded
+  const [open, setOpen] = useState(shouldExpand)
+  useEffect(() => {
+    setOpen(shouldExpand)
+  }, [shouldExpand])
   if (!steps.length) return null
 
-  const isRunning = steps.some((step) => step.status === 'running')
-  const isWaiting = steps.some(
-    (step) =>
-      step.status === 'waiting_user' || step.status === 'waiting_confirmation'
-  )
-  const hasFailed = steps.some((step) => step.status === 'failed')
-  const label = isRunning
-    ? '决策与执行中'
-    : isWaiting
-      ? '等待你的操作'
-      : hasFailed
-        ? '执行与决策未完成'
-        : '执行与决策已结束'
-
   return (
-    <section
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
       className='my-2'
       aria-label='智能体执行与决策轨迹'
       aria-live='polite'
     >
-      <div className='text-muted-foreground flex min-h-6 items-center gap-2 text-xs font-medium'>
+      <CollapsibleTrigger
+        className={cn(
+          'flex min-h-7 w-full items-center gap-2 rounded-sm text-xs font-medium',
+          isWaiting
+            ? 'text-amber-700 dark:text-amber-400'
+            : hasFailed
+              ? 'text-destructive'
+              : 'text-muted-foreground'
+        )}
+      >
         {isRunning ? (
           <LoaderCircle className='size-3.5 animate-spin' />
         ) : (
           <ListChecks className='size-3.5' />
         )}
         <span>{label}</span>
-      </div>
-      <ol className='mt-1 grid gap-1'>
-        {steps.map((step) => (
-          <li
-            key={step.stepId}
-            className='grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2'
-          >
-            <ProgressIcon status={step.status} />
-            <div className='min-w-0'>
-              <div
-                className={cn(
-                  'text-xs leading-5 font-medium',
-                  step.status === 'failed'
-                    ? 'text-destructive'
-                    : 'text-foreground'
-                )}
-              >
-                {step.title}
-              </div>
-              {step.detail ? (
-                <div className='text-muted-foreground text-xs leading-4'>
-                  {step.detail}
+        <ChevronDown
+          className={cn(
+            'ms-auto size-3.5 transition-transform',
+            !open && '-rotate-90'
+          )}
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <ol className='mt-1 grid gap-1'>
+          {steps.map((step) => (
+            <li
+              key={step.stepId}
+              className='grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2'
+            >
+              <ProgressIcon status={step.status} />
+              <div className='min-w-0'>
+                <div
+                  className={cn(
+                    'text-xs leading-5 font-medium',
+                    step.status === 'failed'
+                      ? 'text-destructive'
+                      : 'text-foreground'
+                  )}
+                >
+                  {step.title}
                 </div>
-              ) : null}
-            </div>
-          </li>
-        ))}
-      </ol>
-      {recovered.length ? <RecoveredAttempts attempts={recovered} /> : null}
-    </section>
+                {step.detail ? (
+                  <div className='text-muted-foreground text-xs leading-4'>
+                    {step.detail}
+                  </div>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ol>
+        {recovered.length ? <RecoveredAttempts attempts={recovered} /> : null}
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
