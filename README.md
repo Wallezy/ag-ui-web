@@ -31,3 +31,7 @@ both backend artifacts, update `contracts/SHA256SUMS`, and update the parser con
 checked-in hashes make an unsynchronized schema or fixture change fail before build or deployment.
 
 In development, `/api` is proxied to `http://localhost:8081` by Vite. Override it with `VITE_AGENT_API_BASE_URL` only when you intentionally want the browser to call another backend origin directly.
+
+Stable development builds set `VITE_FRONTEND_REVISION` to the full Git SHA. The header's diagnostics
+dialog compares that build revision with the backend's sanitized `/api/health` pairing and shows the
+current public trace/task identifiers. The dialog never renders raw tool payloads or private prompts.

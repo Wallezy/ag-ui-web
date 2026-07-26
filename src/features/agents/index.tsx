@@ -56,6 +56,10 @@ import {
 import { classifyOaSessionFailure } from './api-error'
 import { AgentClarificationCard } from './clarification-card'
 import {
+  DevelopmentDiagnostics,
+  type CurrentTaskDiagnostics,
+} from './development-diagnostics'
+import {
   AgentExecutionProgress,
   AgentExecutionProgressGroup,
 } from './execution-progress'
@@ -84,6 +88,12 @@ const PROJECT_MANAGER_QUICK_ACTIONS: ThreadQuickAction[] = [
     prompt: '我要写日报',
   },
 ]
+const EMPTY_TASK_DIAGNOSTICS: CurrentTaskDiagnostics = {
+  traceId: null,
+  taskId: null,
+  taskVersion: -1,
+  schemaVersion: null,
+}
 
 export function AgentWorkspace({
   initialAgentId,
@@ -112,6 +122,8 @@ export function AgentWorkspace({
   )
   const [oaSessionMessage, setOaSessionMessage] = useState<string | null>(null)
   const [oaSessionCheckVersion, setOaSessionCheckVersion] = useState(0)
+  const [taskDiagnostics, setTaskDiagnostics] =
+    useState<CurrentTaskDiagnostics>(EMPTY_TASK_DIAGNOSTICS)
   const refreshTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
     null
   )
@@ -301,6 +313,10 @@ export function AgentWorkspace({
     window.location.assign(ADMIN_PORTAL_URL)
   }, [])
 
+  useEffect(() => {
+    setTaskDiagnostics(EMPTY_TASK_DIAGNOSTICS)
+  }, [activeConversationId])
+
   const handleLogout = useCallback(async () => {
     if (isLoggingOut) return
 
@@ -333,6 +349,7 @@ export function AgentWorkspace({
           </div>
         </div>
         <div className='ms-auto flex items-center gap-2'>
+          <DevelopmentDiagnostics task={taskDiagnostics} />
           <Button
             size='sm'
             variant='ghost'
@@ -496,6 +513,7 @@ export function AgentWorkspace({
                 agent={activeAgent}
                 conversationId={activeConversationId}
                 onConversationActivity={handleConversationActivity}
+                onTaskDiagnostics={setTaskDiagnostics}
                 quickActions={
                   activeAgent.id === 'projectManagerAgent'
                     ? PROJECT_MANAGER_QUICK_ACTIONS
@@ -520,11 +538,13 @@ function AgentThread({
   agent: activeAgent,
   conversationId,
   onConversationActivity,
+  onTaskDiagnostics,
   quickActions,
 }: {
   agent: AgentConfig
   conversationId: string
   onConversationActivity: () => void
+  onTaskDiagnostics: (diagnostics: CurrentTaskDiagnostics) => void
   quickActions?: ThreadQuickAction[]
 }) {
   const agent = useMemo(
@@ -570,6 +590,23 @@ function AgentThread({
     adapters: { history },
     onError: handleRunError,
   })
+
+  useEffect(() => {
+    const publish = () => {
+      const state = agent.taskViewStore.getSnapshot()
+      onTaskDiagnostics({
+        traceId: state.traceId,
+        taskId: state.taskId,
+        taskVersion: state.taskVersion,
+        schemaVersion: state.schemaVersion,
+      })
+    }
+    publish()
+    const unsubscribe = agent.taskViewStore.subscribe(publish)
+    return () => {
+      unsubscribe()
+    }
+  }, [agent, onTaskDiagnostics])
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>

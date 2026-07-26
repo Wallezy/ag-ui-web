@@ -12,7 +12,7 @@
     "dev": "vite --config vite.config.ts",
     "build": "tsc -b && vite build --config vite.config.ts",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "smoke:dev-stable": "node --experimental-strip-types --test tests/runtime-http-agent.test.ts tests/task-delta.test.ts tests/oa-public-events.test.ts tests/daily-report-confirmation.test.ts tests/api-error.test.ts",
+    "smoke:dev-stable": "node --experimental-strip-types --test tests/runtime-http-agent.test.ts tests/task-delta.test.ts tests/oa-public-events.test.ts tests/development-diagnostics.test.ts tests/daily-report-confirmation.test.ts tests/api-error.test.ts",
     "lint": "eslint .",
     "typecheck": "tsc -b --pretty false",
     "preview": "vite preview --config vite.config.ts",

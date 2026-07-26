@@ -48,7 +48,7 @@ quality:
     - pnpm run test
     - pnpm run lint
     - pnpm run format:check
-    - pnpm run build
+    - VITE_FRONTEND_REVISION=$CI_COMMIT_SHA pnpm run build
   artifacts:
     paths:
       - dist
@@ -71,8 +71,7 @@ build:
   before_script:
     - mkdir -p ~/.docker
     - cat $DOCKER_REGISTRY_LOGIN_CONFIG > ~/.docker/config.json
-    - FORMAT_COMMIT_TIME=$(echo $CI_COMMIT_TIMESTAMP | sed 's/[:-]/-/g; s/+.*$//g')
-    - IMAGE_TAG=$FORMAT_COMMIT_TIME${CI_COMMIT_TAG:+-$CI_COMMIT_TAG}
+    - IMAGE_TAG=$CI_COMMIT_SHA
   script:
     - echo "dist files" `ls dist/`
     - docker build -t $DOCKER_REGISTRY_URL/$CI_PROJECT_NAME:$IMAGE_TAG .
@@ -95,9 +94,9 @@ deploy-ks:
   script:
     - echo $CI_PROJECT_NAME
     - echo $DOCKER_REGISTRY_VPC_URL
-    - FORMAT_COMMIT_TIME=$(echo $CI_COMMIT_TIMESTAMP | sed 's/[:-]/-/g; s/+.*$//g')
-    - IMAGE_TAG=$FORMAT_COMMIT_TIME${CI_COMMIT_TAG:+-$CI_COMMIT_TAG}
+    - IMAGE_TAG=$CI_COMMIT_SHA
     - kubectl set image -n=oa deployment/$CI_PROJECT_NAME $CI_PROJECT_NAME=$DOCKER_REGISTRY_URL/$CI_PROJECT_NAME:$IMAGE_TAG
+    - kubectl annotate -n=oa deployment/$CI_PROJECT_NAME rockycore.io/frontend-revision=$CI_COMMIT_SHA --overwrite
   rules:
     - if: '$CI_COMMIT_BRANCH == "dev"'
 

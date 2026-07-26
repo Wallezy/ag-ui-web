@@ -51,6 +51,8 @@ test('parses v3 typed slots and deduplicates its v2 projection', () => {
   }, 3)
   assert.equal(store.accept(v3), true)
   assert.equal(store.getSnapshot().understanding?.slots?.[0]?.valueSummary, '王翔')
+  assert.equal(store.getSnapshot().traceId, 'trace-1')
+  assert.equal(store.getSnapshot().schemaVersion, 3)
   assert.equal(store.accept(event('dual', 2)), false)
   assert.equal(store.getSnapshot().eventIds.size, 1)
 })

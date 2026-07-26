@@ -68,8 +68,10 @@ export type AgentTaskRepair = {
 }
 
 export type AgentTaskViewState = {
+  traceId: string | null
   taskId: string | null
   taskVersion: number
+  schemaVersion: 2 | 3 | null
   eventIds: ReadonlySet<string>
   understanding: PublicPayload | null
   pending: PublicPayload | null
@@ -81,8 +83,10 @@ export type AgentTaskViewState = {
 }
 
 export const initialAgentTaskViewState: AgentTaskViewState = {
+  traceId: null,
   taskId: null,
   taskVersion: -1,
+  schemaVersion: null,
   eventIds: new Set(),
   understanding: null,
   pending: null,
@@ -164,8 +168,10 @@ export function reduceAgentTaskViewState(
   eventIds.add(event.eventId)
   const next: AgentTaskViewState = {
     ...base,
+    traceId: event.traceId,
     taskId: event.taskId,
     taskVersion: event.taskVersion,
+    schemaVersion: event.schemaVersion,
     eventIds,
     v2Observed: true,
     ...(event.taskVersion > base.taskVersion

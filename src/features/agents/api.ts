@@ -82,6 +82,17 @@ type RequestOptions = {
   redirectOnUnauthorized?: boolean
 }
 
+export type AgentHealthResponse = {
+  status?: unknown
+  oaV2EffectiveConfig?: unknown
+}
+
+export function loadAgentHealth() {
+  return request<AgentHealthResponse>('/api/health', undefined, {
+    redirectOnUnauthorized: false,
+  })
+}
+
 type OaSessionStatus = {
   authenticated: boolean
   username?: string
