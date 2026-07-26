@@ -326,6 +326,50 @@ test('marks an aborted task delta as an unknown result', async () => {
   )
 })
 
+test('a fresh runtime after reload does not replay an unknown task delta', async () => {
+  const failed = new RuntimeHttpAgent({
+    url: 'http://agent.test/api/agent/ag-ui',
+    fetch: async () => {
+      throw new TypeError('network reset')
+    },
+  })
+  failed.queueTaskDelta({
+    schemaVersion: 1,
+    operation: 'REPLACE_SLOT',
+    taskId: 'task-1',
+    expectedVersion: 2,
+    slotName: 'projectName',
+    newValue: '项目甲',
+  })
+  await assert.rejects(
+    failed.runAgent({
+      ...input,
+      messages: [{ id: 'message-before-reload', role: 'user', content: '修改项目' }],
+    })
+  )
+  assert.equal(failed.taskDeltaStore.getSnapshot().status, 'RETRYABLE_UNKNOWN')
+
+  const bodies: Array<{ forwardedProps: Record<string, unknown> }> = []
+  const reloaded = new RuntimeHttpAgent({
+    url: 'http://agent.test/api/agent/ag-ui',
+    fetch: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return sseResponse(
+        { type: 'RUN_STARTED', threadId: 'conversation-1', runId: 'run-reloaded' },
+        { type: 'RUN_FINISHED', threadId: 'conversation-1', runId: 'run-reloaded' }
+      )
+    },
+  })
+
+  assert.equal(reloaded.taskDeltaStore.getSnapshot().status, 'IDLE')
+  await reloaded.runAgent({
+    ...input,
+    runId: 'run-reloaded',
+    messages: [{ id: 'message-after-reload', role: 'user', content: '刷新后的新问题' }],
+  })
+  assert.equal(bodies[0]?.forwardedProps.oaTaskDelta, undefined)
+})
+
 test('requires authoritative rebase after a task delta conflict', async () => {
   const bodies: Array<{ forwardedProps: Record<string, unknown> }> = []
   let attempts = 0
