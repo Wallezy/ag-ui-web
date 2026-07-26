@@ -1,4 +1,4 @@
-# OA V2 Frontend Compatibility and Rollback
+# OA V2 Frontend Compatibility
 
 The frontend treats `oa.public_agent_event` schemas 2 and 3 as optional display state. It never uses a
 public event as permission, write confirmation, identity, or business-success authority. The legacy
@@ -21,9 +21,9 @@ not `WRITE_CONFIRMATION`. Option answers and free text are sent as one-shot `oaT
 frontend business-slot allowlist. Tenant, user, session, permission, and confirmation fields are not
 editable.
 
-## Release checks
+## Local checks
 
-Use Node 22.13 or newer (Node 24 is the tested release runtime) and pnpm 11.10.0:
+Use Node 22.13 or newer and pnpm 11.10.0:
 
 ```bash
 node --version
@@ -33,31 +33,23 @@ pnpm test
 pnpm lint
 pnpm format:check
 pnpm build
-git rev-parse HEAD
 ```
 
-Record the frontend build SHA beside the backend build, public-event schema, policy, calibration,
-and dataset versions in the release ticket. Validate both mixed-version rows in the compatibility
-matrix before increasing backend execution traffic.
+Validate the mixed-version rows in the compatibility matrix when changing the backend event schema.
+A version mismatch or unknown future schema is ignored and falls back to v1; it never authorizes
+execution.
 
-Deploy schema-3 frontend parsing before switching backend emission from schema 2. Backend event
-enablement is a display-only stage: execution allowlists remain empty until the separate read canary
-has production evidence. A version mismatch or unknown future schema is ignored and falls back to
-v1; it never authorizes execution.
+## Diagnostics and fallback
 
-## Monitoring and rollback
-
-Monitor rejected V2 envelopes, stale/duplicate event counts, clarification submit failures, HTTP 409
+Inspect rejected V2 envelopes, stale/duplicate event counts, clarification submit failures, HTTP 409
 version conflicts, and the share of sessions falling back to v1. Do not log free text, raw tool data,
 or task-delta values.
 
-Rollback the backend behavior in the order documented in
-`agent-platform/docs/operations/oa-v2-rollout-runbook.md`. The frontend requires no emergency data
-migration: disabling backend public events removes the V2 panels on the next run while v1 progress
-continues. If the frontend itself must be rolled back, deploy the previous immutable build; the
-backend must retain v1 and additive schema-2 events for at least two stable releases.
+Disabling backend public events removes the V2 panels on the next run while v1 progress continues.
+The backend should retain v1 and additive schema-2 events while older development clients remain in
+use.
 
-Frontend rollback never discards, rewrites, or supersedes authoritative backend TaskState. In
+Frontend fallback never discards, rewrites, or supersedes authoritative backend TaskState. In
 particular, a correction already accepted by the backend remains the current value even when the UI
 falls back to schema 2 or v1. The frontend has no authority over tool selection, completion,
 permissions, confirmation, idempotency, audit, or `COMMIT_UNKNOWN` handling.

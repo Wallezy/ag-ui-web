@@ -11,7 +11,6 @@ import {
 } from '@/components/ui/dialog'
 import { loadAgentHealth } from './api'
 import {
-  displayRevision,
   parseBackendDiagnostics,
   type BackendDiagnostics,
 } from './development-diagnostics-data'
@@ -52,9 +51,6 @@ export function DevelopmentDiagnostics({
     if (open) load()
   }, [open])
 
-  const frontendRevision =
-    import.meta.env.VITE_FRONTEND_REVISION ?? 'unavailable'
-
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -67,7 +63,7 @@ export function DevelopmentDiagnostics({
         <DialogHeader>
           <DialogTitle>运行诊断</DialogTitle>
           <DialogDescription>
-            开发稳定环境的版本与公开追踪信息
+            开发稳定环境的功能状态与公开追踪信息
           </DialogDescription>
         </DialogHeader>
 
@@ -95,19 +91,6 @@ export function DevelopmentDiagnostics({
             <DiagnosticRow
               label='Profile'
               value={diagnostics.activeProfiles.join(', ') || '未声明'}
-            />
-            <DiagnosticRow label='发布阶段' value={diagnostics.rolloutStage} />
-            <DiagnosticRow
-              label='后端 SHA'
-              value={displayRevision(diagnostics.backendRevision)}
-            />
-            <DiagnosticRow
-              label='前端 SHA'
-              value={displayRevision(frontendRevision)}
-            />
-            <DiagnosticRow
-              label='配对前端 SHA'
-              value={displayRevision(diagnostics.expectedFrontendRevision)}
             />
             <DiagnosticRow
               label='事件 schema'

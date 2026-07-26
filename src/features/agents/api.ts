@@ -84,7 +84,7 @@ type RequestOptions = {
 
 export type AgentHealthResponse = {
   status?: unknown
-  oaV2EffectiveConfig?: unknown
+  oaDevelopmentDiagnostics?: unknown
 }
 
 export function loadAgentHealth() {

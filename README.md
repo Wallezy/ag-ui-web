@@ -19,19 +19,18 @@ corepack pnpm@11.10.0 typecheck
 corepack pnpm@11.10.0 build
 ```
 
-## Quality Gates
+## Local Quality Checks
 
-GitHub pull requests and pushes to `github-dev` or `dev` run the complete frontend quality gate. GitLab merge requests
-run the same gate; image build and deployment remain restricted to `dev` and depend on its successful result. Both CI
-systems execute frozen dependency installation, the pinned OA public-event contract hashes, type checking, tests, lint,
-format checking, and the production build.
+Run the pinned OA public-event contract hash check, type checking, tests, lint, format checking, and
+build locally before handing off a change. The repository's CI/CD and deployment policy are outside
+the current agent architecture work.
 
 The versioned backend event schema and fixture are copied under `contracts/`. Any intentional contract update must copy
 both backend artifacts, update `contracts/SHA256SUMS`, and update the parser contract tests in the same change. The
-checked-in hashes make an unsynchronized schema or fixture change fail before build or deployment.
+checked-in hashes make an unsynchronized schema or fixture change fail during local verification.
 
 In development, `/api` is proxied to `http://localhost:8081` by Vite. Override it with `VITE_AGENT_API_BASE_URL` only when you intentionally want the browser to call another backend origin directly.
 
-Stable development builds set `VITE_FRONTEND_REVISION` to the full Git SHA. The header's diagnostics
-dialog compares that build revision with the backend's sanitized `/api/health` pairing and shows the
-current public trace/task identifiers. The dialog never renders raw tool payloads or private prompts.
+The header diagnostics dialog reads the backend's sanitized `/api/health` development diagnostics
+and shows the current public trace/task identifiers. It does not depend on build revision pairing and
+never renders raw tool payloads or private prompts.
