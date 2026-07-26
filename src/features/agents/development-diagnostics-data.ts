@@ -6,6 +6,7 @@ export type BackendDiagnostics = {
   publicEventSchemaVersion: number | null
   taskStateSchemaVersion: number | null
   calibrationExecutionEligible: boolean | null
+  agentRuntimeErrorCount: number | null
 }
 
 export function parseBackendDiagnostics(
@@ -24,6 +25,7 @@ export function parseBackendDiagnostics(
       typeof calibration?.executionEligible === 'boolean'
         ? calibration.executionEligible
         : null,
+    agentRuntimeErrorCount: integer(health.agentRuntimeErrorCount),
   }
 }
 

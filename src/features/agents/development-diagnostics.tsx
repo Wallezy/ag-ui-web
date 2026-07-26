@@ -109,6 +109,16 @@ export function DevelopmentDiagnostics({
               }
             />
             <DiagnosticRow
+              label='未分类失败'
+              value={
+                diagnostics.agentRuntimeErrorCount === null
+                  ? '未知'
+                  : diagnostics.agentRuntimeErrorCount === 0
+                    ? '0（正常）'
+                    : `${diagnostics.agentRuntimeErrorCount}（需排查日志）`
+              }
+            />
+            <DiagnosticRow
               label='traceId'
               value={task.traceId ?? '当前会话暂无'}
               copyable={task.traceId !== null}

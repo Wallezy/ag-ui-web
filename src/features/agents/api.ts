@@ -85,6 +85,7 @@ type RequestOptions = {
 export type AgentHealthResponse = {
   status?: unknown
   oaDevelopmentDiagnostics?: unknown
+  agentRuntimeErrorCount?: unknown
 }
 
 export function loadAgentHealth() {
