@@ -9,7 +9,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { IconFrame, OaMetric } from './primitives'
-import { formatDateRange, formatNumber } from './shared'
+import { formatDateRange, formatDateText, formatNumber } from './shared'
 import type { UserWorkHoursResult } from './work-hour-query-data'
 
 export function OaUserWorkHoursCard({
@@ -28,6 +28,7 @@ export function OaUserWorkHoursCard({
       ? `已汇总 ${result.recordCount} 条有效工时记录。`
       : '该日期范围内没有已登记工时。')
   const breakdown = result.typeBreakdown.slice(0, 6)
+  const details = result.details.slice(0, 8)
 
   return (
     <Card className='w-full max-w-2xl gap-4 rounded-lg py-4 shadow-none'>
@@ -75,6 +76,51 @@ export function OaUserWorkHoursCard({
                 {item.typeName} {formatNumber(item.workHours)} 小时
               </Badge>
             ))}
+          </div>
+        ) : null}
+
+        {details.length ? (
+          <div className='border-t pt-3'>
+            <div className='mb-2 text-sm font-medium'>工作内容</div>
+            <div className='divide-y'>
+              {details.map((detail, index) => (
+                <div
+                  key={`${detail.workDate || 'date'}-${detail.title || detail.executionDesc || 'detail'}-${index}`}
+                  className='flex flex-col gap-1 py-2 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between sm:gap-4'
+                >
+                  <div className='min-w-0'>
+                    <div className='flex flex-wrap items-center gap-2 text-sm'>
+                      {detail.workDate ? (
+                        <span className='text-muted-foreground'>
+                          {formatDateText(detail.workDate)}
+                        </span>
+                      ) : null}
+                      {detail.projectName ? (
+                        <span className='text-muted-foreground'>
+                          {detail.projectName}
+                        </span>
+                      ) : null}
+                      {detail.typeName ? (
+                        <Badge variant='outline'>{detail.typeName}</Badge>
+                      ) : null}
+                    </div>
+                    {detail.title ? (
+                      <div className='mt-1 text-sm font-medium break-words'>
+                        {detail.title}
+                      </div>
+                    ) : null}
+                    {detail.executionDesc || detail.workCategory ? (
+                      <div className='text-muted-foreground mt-1 text-sm break-words'>
+                        {detail.executionDesc || detail.workCategory}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className='shrink-0 text-sm font-medium'>
+                    {formatNumber(detail.workHours)} 小时
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
 

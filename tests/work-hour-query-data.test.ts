@@ -23,7 +23,17 @@ test('projects a work-hour response into user-visible business fields only', () 
     days: [
       {
         workDate: '2026-07-17',
-        details: [{ title: '内部任务', workItemId: 'task-secret' }],
+        details: [
+          {
+            typeName: '任务',
+            projectName: '智能办公平台',
+            title: '意图模型联调',
+            workHours: 1,
+            workCategory: '开发',
+            executionDesc: '验证最近七天工作总结',
+            workItemId: 'task-secret',
+          },
+        ],
       },
     ],
     completeness: { complete: true, discardedRecordCount: 0 },
@@ -40,11 +50,22 @@ test('projects a work-hour response into user-visible business fields only', () 
     recordCount: 1,
     activeDayCount: 1,
     typeBreakdown: [{ typeName: '任务', workHours: 1 }],
+    details: [
+      {
+        workDate: '2026-07-17',
+        typeName: '任务',
+        projectName: '智能办公平台',
+        title: '意图模型联调',
+        workHours: 1,
+        workCategory: '开发',
+        executionDesc: '验证最近七天工作总结',
+      },
+    ],
     complete: true,
   })
   assert.doesNotMatch(
     JSON.stringify(result),
-    /audit-secret|userId|1171|workItemId|task-secret|内部任务/
+    /audit-secret|userId|1171|workItemId|task-secret/
   )
 })
 
