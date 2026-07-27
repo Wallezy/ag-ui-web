@@ -1,6 +1,15 @@
-import { AlertTriangle, ClipboardList } from 'lucide-react'
+import { useState } from 'react'
+import { useAui } from '@assistant-ui/react'
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  Eye,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Card,
   CardAction,
@@ -9,6 +18,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
 import {
   workItemQueryPresentation,
   type WorkItemsResult,
@@ -30,7 +40,8 @@ export function OaWorkItemsCard({
   result: WorkItemsResult
   message?: string
 }) {
-  const visibleItems = result.items.slice(0, 8)
+  const [expanded, setExpanded] = useState(false)
+  const visibleItems = expanded ? result.items : result.items.slice(0, 8)
   const userName = readText(result.user?.userName)
   const projectFilter = isRecord(result.filters?.project)
     ? result.filters.project
@@ -167,9 +178,23 @@ export function OaWorkItemsCard({
           </div>
         )}
 
-        {result.items.length > visibleItems.length ? (
-          <div className='text-muted-foreground text-xs'>
-            已展示前 {visibleItems.length} 项，共 {result.items.length} 项。
+        {result.items.length > 8 ? (
+          <div className='flex items-center justify-between gap-3'>
+            <div className='text-muted-foreground text-xs'>
+              {expanded
+                ? `已展示全部 ${result.items.length} 项。`
+                : `已展示前 8 项，共 ${result.items.length} 项。`}
+            </div>
+            <Button
+              type='button'
+              size='sm'
+              variant='ghost'
+              className='h-7 gap-1 px-2 text-xs'
+              onClick={() => setExpanded((current) => !current)}
+            >
+              {expanded ? <ChevronUp /> : <ChevronDown />}
+              {expanded ? '收起' : '展开全部'}
+            </Button>
           </div>
         ) : null}
       </CardContent>
@@ -244,13 +269,12 @@ export function OaWorkItemDetailCard({
 }
 
 function WorkItemRow({ item }: { item: Record<string, unknown> }) {
-  const title =
-    readText(item.title) ||
-    readText(item.name) ||
-    readText(item.subject) ||
-    readText(item.id) ||
-    '未命名工作项'
-  const type = readText(item.type) || readText(item.workItemType)
+  const aui = useAui()
+  const referenceTitle =
+    readText(item.title) || readText(item.name) || readText(item.subject) || ''
+  const title = referenceTitle || readText(item.id) || '未命名工作项'
+  const reference = readText(item.code) || referenceTitle
+  const type = readText(item.type) || readText(item.workItemType) || ''
   const status = readText(item.status) || readText(item.state)
   const project =
     readText(item.projectTitle) ||
@@ -265,6 +289,20 @@ function WorkItemRow({ item }: { item: Record<string, unknown> }) {
     readText(item.planEndDate) ||
     readText(item.endDate)
   const overdue = readBoolean(item.overdue) === true
+  const canOpenDetail =
+    Boolean(reference) && ['task', 'bug'].includes(type.toLowerCase())
+
+  const openDetail = () => {
+    if (!canOpenDetail || aui.thread().getState().isRunning) return
+    const safeReference = reference.replace(/["'“”‘’「」『』\n\r]/g, ' ').trim()
+    const kind = type.toLowerCase() === 'bug' ? '缺陷' : '任务'
+    aui.thread().append({
+      content: [
+        { type: 'text', text: `查看${kind}「${safeReference}」的详细信息` },
+      ],
+      runConfig: aui.composer().getState().runConfig,
+    })
+  }
 
   return (
     <div className='border-border/70 flex flex-col gap-2 border-b px-3 py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between'>
@@ -282,11 +320,22 @@ function WorkItemRow({ item }: { item: Record<string, unknown> }) {
           {dueDate ? <span>截止 {formatDateText(dueDate)}</span> : null}
         </div>
       </div>
-      {status ? (
-        <Badge variant='secondary' className='self-start sm:self-center'>
-          {status}
-        </Badge>
-      ) : null}
+      <div className='flex shrink-0 items-center gap-2 self-start sm:self-center'>
+        {status ? <Badge variant='secondary'>{status}</Badge> : null}
+        {canOpenDetail ? (
+          <TooltipIconButton
+            tooltip='查看详情'
+            type='button'
+            variant='ghost'
+            size='icon'
+            className='size-7'
+            aria-label={`查看${title}的详情`}
+            onClick={openDetail}
+          >
+            <Eye className='size-4' />
+          </TooltipIconButton>
+        ) : null}
+      </div>
     </div>
   )
 }

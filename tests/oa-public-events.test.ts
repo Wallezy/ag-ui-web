@@ -61,11 +61,17 @@ test('parses bounded clarification metadata and rejects malformed options', () =
   const clarification = parseOaPublicAgentEvent(event('question', 2, 'OA_CLARIFICATION_REQUIRED', {
     questionId: 'question-1',
     questionKind: 'SEMANTIC_CLARIFICATION',
-    options: [{ optionId: 'hours', label: '工时明细' }],
+    options: [
+      { optionId: 'queryKind.workItems', label: '任务和缺陷' },
+      { optionId: 'queryKind.workHours', label: '已登记工时明细' },
+    ],
     allowFreeText: true,
     expiresAt: '2026-07-25T12:05:00Z',
   }))
-  assert.equal(clarification?.payload.options?.[0]?.optionId, 'hours')
+  assert.deepEqual(clarification?.payload.options, [
+    { optionId: 'queryKind.workItems', label: '任务和缺陷' },
+    { optionId: 'queryKind.workHours', label: '已登记工时明细' },
+  ])
   assert.equal(parseOaPublicAgentEvent(event('bad-question', 2, 'OA_CLARIFICATION_REQUIRED', {
     options: [{ optionId: 'hours', label: '工时', hidden: 'unsafe' }],
   })), null)

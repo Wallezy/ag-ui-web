@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Copy, Info, LoaderCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dialog'
 import { loadAgentHealth } from './api'
 import {
+  hasBackendDiagnostics,
   parseBackendDiagnostics,
   type BackendDiagnostics,
 } from './development-diagnostics-data'
@@ -28,28 +29,55 @@ export function DevelopmentDiagnostics({
   task: CurrentTaskDiagnostics
 }) {
   const [open, setOpen] = useState(false)
+  const [availability, setAvailability] = useState<
+    'checking' | 'supported' | 'unsupported' | 'unknown'
+  >('checking')
   const [loading, setLoading] = useState(false)
   const [diagnostics, setDiagnostics] = useState<BackendDiagnostics | null>(
     null
   )
   const [failed, setFailed] = useState(false)
 
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true)
     setFailed(false)
     void loadAgentHealth()
       .then((health) => {
+        if (!hasBackendDiagnostics(health)) {
+          setAvailability('unsupported')
+          setDiagnostics(null)
+          setFailed(false)
+          return
+        }
         const parsed = parseBackendDiagnostics(health)
         setDiagnostics(parsed)
+        setAvailability(parsed === null ? 'unsupported' : 'supported')
         setFailed(parsed === null)
       })
-      .catch(() => setFailed(true))
+      .catch(() => {
+        setAvailability('unknown')
+        setFailed(true)
+      })
       .finally(() => setLoading(false))
-  }
+  }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => {
+    if (availability === 'unsupported') {
+      setOpen(false)
+    }
+  }, [availability])
 
   useEffect(() => {
     if (open) load()
-  }, [open])
+  }, [load, open])
+
+  if (availability === 'checking' || availability === 'unsupported') {
+    return null
+  }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

@@ -211,12 +211,12 @@ test('forwards one queued task delta with the current user message id', async ()
     taskId: 'task-1',
     expectedVersion: 4,
     questionId: 'question-1',
-    optionId: 'hours',
+    optionId: 'queryKind.workHours',
   }), true)
 
   await agent.runAgent({
     ...input,
-    messages: [{ id: 'message-2', role: 'user', content: '工时明细' }],
+    messages: [{ id: 'message-2', role: 'user', content: '已登记工时明细' }],
   })
   await agent.runAgent(input)
 
@@ -226,7 +226,7 @@ test('forwards one queued task delta with the current user message id', async ()
     taskId: 'task-1',
     expectedVersion: 4,
     questionId: 'question-1',
-    optionId: 'hours',
+    optionId: 'queryKind.workHours',
     sourceMessageId: 'message-2',
   })
   assert.equal('oaTaskDelta' in (bodies[1] as { forwardedProps: object }).forwardedProps, false)

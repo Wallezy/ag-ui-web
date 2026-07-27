@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parseBackendDiagnostics } from '../src/features/agents/development-diagnostics-data.ts'
+import {
+  hasBackendDiagnostics,
+  parseBackendDiagnostics,
+} from '../src/features/agents/development-diagnostics-data.ts'
 
 test('parses only the sanitized stable diagnostics contract', () => {
   const parsed = parseBackendDiagnostics({
@@ -39,4 +42,22 @@ test('treats a missing or malformed runtime error count as unknown', () => {
 
 test('fails closed when development diagnostics are unavailable', () => {
   assert.equal(parseBackendDiagnostics({ status: 'UP' }), null)
+})
+
+test('detects whether the backend exposes development diagnostics', () => {
+  assert.equal(
+    hasBackendDiagnostics({
+      status: 'UP',
+      oaDevelopmentDiagnostics: { activeProfiles: ['dev-stable'] },
+    }),
+    true
+  )
+  assert.equal(hasBackendDiagnostics({ status: 'UP' }), false)
+  assert.equal(
+    hasBackendDiagnostics({
+      status: 'UP',
+      oaDevelopmentDiagnostics: null,
+    }),
+    false
+  )
 })

@@ -29,6 +29,10 @@ export function parseBackendDiagnostics(
   }
 }
 
+export function hasBackendDiagnostics(health: AgentHealthResponse): boolean {
+  return record(health.oaDevelopmentDiagnostics) !== null
+}
+
 function stringList(value: unknown) {
   if (!Array.isArray(value)) return []
   return value
