@@ -65,11 +65,9 @@ import {
   AgentExecutionProgress,
   AgentExecutionProgressGroup,
 } from './execution-progress'
-import { AgentRepairTimeline } from './repair-timeline'
 import { RuntimeHttpAgent } from './runtime-http-agent'
 import { AgentToolFallback, AgentToolGroup } from './tool-ui'
 import type { AgentId, ConversationSummary } from './types'
-import { AgentUnderstandingCard } from './understanding-card'
 
 type RefreshOptions = {
   keepSelection?: boolean
@@ -642,11 +640,9 @@ function AgentThread({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <div className='flex h-full min-h-0 flex-col [--agent-reading-max-width:56rem] [--agent-shell-max-width:72rem]'>
-        <AgentUnderstandingCard store={agent.taskViewStore} agent={agent} />
-        <AgentClarificationCard agent={agent} />
-        <AgentRepairTimeline store={agent.taskViewStore} />
         <div className='min-h-0 flex-1'>
           <Thread
+            interaction={<AgentClarificationCard agent={agent} />}
             components={{
               Reasoning: AgentExecutionProgress,
               ReasoningGroup: AgentExecutionProgressGroup,

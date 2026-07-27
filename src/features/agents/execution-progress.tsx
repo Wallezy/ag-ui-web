@@ -38,7 +38,7 @@ export const AgentExecutionProgress: ReasoningMessagePartComponent = ({
   useEffect(() => {
     setOpen(shouldExpand)
   }, [shouldExpand])
-  if (!steps.length) return null
+  if (!steps.length || (isWaiting && !hasFailed)) return null
 
   return (
     <Collapsible

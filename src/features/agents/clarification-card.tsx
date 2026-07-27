@@ -1,13 +1,7 @@
-import {
-  useEffect,
-  useState,
-  useSyncExternalStore,
-  type FormEvent,
-} from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useThreadRuntime } from '@assistant-ui/react'
-import { CircleHelp, Send } from 'lucide-react'
+import { CircleHelp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import type { RuntimeHttpAgent } from './runtime-http-agent'
 
 export function AgentClarificationCard({ agent }: { agent: RuntimeHttpAgent }) {
@@ -16,14 +10,12 @@ export function AgentClarificationCard({ agent }: { agent: RuntimeHttpAgent }) {
     agent.taskViewStore.getSnapshot
   )
   const thread = useThreadRuntime()
-  const [freeText, setFreeText] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [expired, setExpired] = useState(false)
   const pending = state.pending
   const questionId = pending?.questionId
   useEffect(() => {
     setSubmitting(false)
-    setFreeText('')
   }, [questionId, state.taskVersion])
   useEffect(() => {
     if (!pending?.expiresAt) {
@@ -44,16 +36,16 @@ export function AgentClarificationCard({ agent }: { agent: RuntimeHttpAgent }) {
     return null
   const disabled = expired || submitting
 
-  const submit = (label: string, optionId?: string, text?: string) => {
+  const submit = (label: string, optionId: string) => {
     if (disabled || !state.taskId) return
     const queued = agent.queueTaskDelta({
       schemaVersion: 1,
-      operation: optionId ? 'SELECT_CANDIDATE' : 'ANSWER_CLARIFICATION',
+      operation: 'SELECT_CANDIDATE',
       taskId: state.taskId,
       expectedVersion: state.taskVersion,
       questionId,
-      optionId: optionId ?? '',
-      freeText: text ?? '',
+      optionId,
+      freeText: '',
       slotName: '',
       oldValue: null,
       newValue: null,
@@ -63,76 +55,56 @@ export function AgentClarificationCard({ agent }: { agent: RuntimeHttpAgent }) {
     thread.append(label)
   }
 
-  const submitFreeText = (event: FormEvent) => {
-    event.preventDefault()
-    const text = freeText.trim()
-    if (text) submit(text, undefined, text)
-  }
-
   return (
-    <div className='border-border/80 bg-background shrink-0 border-b px-4 py-2.5 sm:px-6'>
-      <section
-        className='bg-card mx-auto max-w-3xl rounded-md border px-3 py-3 shadow-xs'
-        aria-labelledby={`question-${questionId}`}
-      >
-        <div className='flex items-start gap-2'>
-          <CircleHelp className='text-primary mt-0.5 size-4 shrink-0' />
-          <div className='min-w-0 flex-1'>
-            <h2 id={`question-${questionId}`} className='text-sm font-semibold'>
-              需要确认
-            </h2>
-            <p className='text-muted-foreground mt-0.5 text-sm'>
-              {pending.displayMessage}
-            </p>
-          </div>
+    <section
+      className='border-border/80 bg-card fade-in slide-in-from-bottom-1 animate-in rounded-md border p-4 shadow-xs duration-150'
+      aria-labelledby={`question-${questionId}`}
+      aria-live='polite'
+    >
+      <div className='flex items-start gap-3'>
+        <div className='bg-primary/10 text-primary flex size-8 shrink-0 items-center justify-center rounded-md'>
+          <CircleHelp className='size-4' />
         </div>
-        {expired ? (
-          <p className='mt-2 text-xs text-amber-700 dark:text-amber-400'>
-            这个问题已过期，请重新描述你的需求。
+        <div className='min-w-0 flex-1'>
+          <h2 id={`question-${questionId}`} className='text-sm font-semibold'>
+            {pending.questionKind === 'USER_ACTION' ? '下一步' : '请选择一项'}
+          </h2>
+          <p className='text-muted-foreground mt-1 text-sm leading-6'>
+            {pending.displayMessage}
           </p>
-        ) : null}
-        {!expired && pending.options?.length ? (
-          <div className='mt-3 flex flex-wrap gap-2'>
-            {pending.options.map((option) => (
-              <Button
-                key={option.optionId}
-                type='button'
-                variant='outline'
-                size='sm'
-                disabled={disabled}
-                onClick={() => submit(option.label, option.optionId)}
-              >
-                {option.label}
-              </Button>
-            ))}
-          </div>
-        ) : null}
-        {!expired && pending.allowFreeText ? (
-          <form className='mt-3 flex gap-2' onSubmit={submitFreeText}>
-            <Input
-              value={freeText}
-              onChange={(event) => setFreeText(event.target.value)}
-              disabled={disabled}
-              maxLength={500}
-              aria-label='补充说明'
-              placeholder='补充说明'
-            />
+        </div>
+      </div>
+      {expired ? (
+        <p className='mt-3 text-sm text-amber-700 dark:text-amber-400'>
+          这项选择已过期，请重新描述需求。
+        </p>
+      ) : null}
+      {!expired && pending.options?.length ? (
+        <div
+          className='mt-4 flex flex-wrap gap-2'
+          role='group'
+          aria-label={pending.displayMessage}
+        >
+          {pending.options.map((option) => (
             <Button
-              type='submit'
-              size='icon'
-              disabled={disabled || !freeText.trim()}
-              aria-label='提交补充说明'
+              key={option.optionId}
+              type='button'
+              variant='outline'
+              size='sm'
+              className='min-h-9 rounded-md px-4'
+              disabled={disabled}
+              onClick={() => submit(option.label, option.optionId)}
             >
-              <Send className='size-4' />
+              {option.label}
             </Button>
-          </form>
-        ) : null}
-        {submitting ? (
-          <p className='text-muted-foreground mt-2 text-xs' role='status'>
-            正在提交回答...
-          </p>
-        ) : null}
-      </section>
-    </div>
+          ))}
+        </div>
+      ) : null}
+      {submitting ? (
+        <p className='text-muted-foreground mt-3 text-xs' role='status'>
+          正在处理你的选择...
+        </p>
+      ) : null}
+    </section>
   )
 }

@@ -8,6 +8,7 @@ import {
   type ComponentType,
   type FC,
   type PropsWithChildren,
+  type ReactNode,
 } from 'react'
 import {
   ActionBarMorePrimitive,
@@ -88,6 +89,7 @@ export type ThreadQuickAction = {
 export type ThreadProps = {
   components?: ThreadComponents | undefined
   quickActions?: ThreadQuickAction[] | undefined
+  interaction?: ReactNode
 }
 
 const EMPTY_COMPONENTS: ThreadComponents = {}
@@ -103,12 +105,17 @@ const isNewChatView = (s: AssistantState) =>
 export const Thread: FC<ThreadProps> = ({
   components = EMPTY_COMPONENTS,
   quickActions = [],
+  interaction,
 }) => {
   const isEmpty = useAuiState(isNewChatView)
 
   return (
     <ThreadComponentsContext.Provider value={components}>
-      <ThreadRoot isEmpty={isEmpty} quickActions={quickActions} />
+      <ThreadRoot
+        isEmpty={isEmpty}
+        quickActions={quickActions}
+        interaction={interaction}
+      />
     </ThreadComponentsContext.Provider>
   )
 }
@@ -116,7 +123,8 @@ export const Thread: FC<ThreadProps> = ({
 const ThreadRoot: FC<{
   isEmpty: boolean
   quickActions: ThreadQuickAction[]
-}> = ({ isEmpty, quickActions }) => {
+  interaction?: ReactNode
+}> = ({ isEmpty, quickActions, interaction }) => {
   const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext)
   const hasQuickActions = quickActions.length > 0
 
@@ -156,6 +164,15 @@ const ThreadRoot: FC<{
               {() => <ThreadMessage />}
             </ThreadPrimitive.Messages>
           </div>
+
+          {interaction ? (
+            <div
+              data-slot='aui_thread-interaction'
+              className='mx-auto mb-5 w-full max-w-(--thread-reading-max-width) px-2 empty:hidden'
+            >
+              {interaction}
+            </div>
+          ) : null}
 
           <ThreadPrimitive.ViewportFooter
             className={cn(
