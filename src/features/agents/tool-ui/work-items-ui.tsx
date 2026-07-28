@@ -209,9 +209,10 @@ export function OaWorkItemDetailCard({
   item: Record<string, unknown>
   message?: string
 }) {
+  const code = readText(item.code)
   const title =
     readText(item.title) ||
-    readText(item.code) ||
+    code ||
     readText(item.id) ||
     '工作项详情'
   const type = readText(item.type) || readText(item.workItemType)
@@ -256,6 +257,7 @@ export function OaWorkItemDetailCard({
         </div>
       </CardHeader>
       <CardContent className='grid gap-2 px-4 sm:grid-cols-3 sm:px-5'>
+        {code ? <OaMetric label='编号' value={code} /> : null}
         <OaMetric label='优先级' value={priority || '-'} />
         <OaMetric label='状态' value={status || '-'} />
         <OaMetric label='项目' value={project || '-'} />
