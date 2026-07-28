@@ -1,0 +1,341 @@
+import { useState } from 'react'
+import { useAui } from '@assistant-ui/react'
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  Eye,
+} from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
+import {
+  workItemQueryPresentation,
+  type WorkItemsResult,
+} from '../work-items-result'
+import { IconFrame, OaMetric } from './primitives'
+import {
+  formatDateRange,
+  formatDateText,
+  formatWorkItemType,
+  isRecord,
+  readBoolean,
+  readText,
+} from './shared'
+
+export function OaWorkItemsCard({
+  result,
+  message,
+}: {
+  result: WorkItemsResult
+  message?: string
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const visibleItems = expanded ? result.items : result.items.slice(0, 8)
+  const userName = readText(result.user?.userName)
+  const projectFilter = isRecord(result.filters?.project)
+    ? result.filters.project
+    : undefined
+  const projectName = readText(projectFilter?.projectName)
+  const assigneeSpecified =
+    readBoolean(result.filters?.assigneeSpecified) === true
+  const overdueOnly = readBoolean(result.filters?.overdue) === true
+  const dateRange = formatDateRange(result.dateRange)
+  const presentation = workItemQueryPresentation(result, message)
+  const queryStatus = result.completeness.status
+  const queryTone =
+    queryStatus === 'FAILED'
+      ? 'danger'
+      : queryStatus === 'PARTIAL'
+        ? 'warning'
+        : 'default'
+
+  return (
+    <Card className='w-full max-w-2xl gap-4 rounded-lg py-4 shadow-none'>
+      <CardHeader className='gap-3 px-4 sm:px-5'>
+        <div className='flex items-start gap-3'>
+          <IconFrame
+            icon={queryStatus === 'COMPLETE' ? ClipboardList : AlertTriangle}
+            tone={queryTone}
+          />
+          <div className='min-w-0 flex-1'>
+            <div className='flex min-w-0 flex-wrap items-center gap-2'>
+              <CardTitle className='truncate text-base'>
+                {assigneeSpecified && userName
+                  ? `${userName}的工作项`
+                  : projectName
+                    ? `${projectName}工作项`
+                    : presentation.title}
+              </CardTitle>
+              <Badge
+                variant={
+                  queryStatus === 'FAILED'
+                    ? 'destructive'
+                    : queryStatus === 'PARTIAL'
+                      ? 'outline'
+                      : 'secondary'
+                }
+                className={
+                  queryStatus === 'PARTIAL'
+                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                    : undefined
+                }
+              >
+                {presentation.badge}
+              </Badge>
+              {overdueOnly ? <Badge variant='destructive'>仅逾期</Badge> : null}
+            </div>
+            <CardDescription className='mt-1'>
+              {presentation.description}
+            </CardDescription>
+          </div>
+          <CardAction>
+            <Badge variant='outline'>{presentation.countLabel}</Badge>
+          </CardAction>
+        </div>
+      </CardHeader>
+
+      <CardContent className='flex flex-col gap-4 px-4 sm:px-5'>
+        <div className='grid gap-2 sm:grid-cols-3'>
+          <OaMetric
+            label='查询对象'
+            value={
+              assigneeSpecified
+                ? userName || '-'
+                : projectName
+                  ? '项目成员'
+                  : userName || '-'
+            }
+          />
+          <OaMetric label='项目' value={projectName || '全部可见项目'} />
+          <OaMetric label='日期范围' value={dateRange || '-'} />
+        </div>
+
+        {presentation.noticeTitle && visibleItems.length ? (
+          <div className='rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-3 text-sm'>
+            <div className='flex items-start gap-2'>
+              <AlertTriangle className='mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300' />
+              <div className='min-w-0'>
+                <div className='font-medium'>{presentation.noticeTitle}</div>
+                <div className='text-muted-foreground mt-0.5 text-xs leading-5'>
+                  {presentation.noticeDescription}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {visibleItems.length ? (
+          <div className='overflow-hidden rounded-md border'>
+            {visibleItems.map((item, index) => (
+              <WorkItemRow
+                key={readText(item.id) || readText(item.workItemId) || index}
+                item={item}
+              />
+            ))}
+          </div>
+        ) : (
+          <div
+            className={cn(
+              'rounded-md border px-3 py-4 text-sm',
+              queryStatus === 'FAILED'
+                ? 'border-destructive/30 bg-destructive/5'
+                : queryStatus === 'PARTIAL'
+                  ? 'border-amber-500/30 bg-amber-500/5'
+                  : 'bg-muted/20'
+            )}
+          >
+            <div className='flex items-start gap-2'>
+              {queryStatus === 'COMPLETE' ? (
+                <ClipboardList className='text-muted-foreground mt-0.5 size-4 shrink-0' />
+              ) : (
+                <AlertTriangle
+                  className={cn(
+                    'mt-0.5 size-4 shrink-0',
+                    queryStatus === 'FAILED'
+                      ? 'text-destructive'
+                      : 'text-amber-700 dark:text-amber-300'
+                  )}
+                />
+              )}
+              <div className='min-w-0'>
+                <div className='font-medium'>{presentation.emptyTitle}</div>
+                <div className='text-muted-foreground mt-1 text-xs leading-5'>
+                  {presentation.emptyDescription}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {result.items.length > 8 ? (
+          <div className='flex items-center justify-between gap-3'>
+            <div className='text-muted-foreground text-xs'>
+              {expanded
+                ? `已展示全部 ${result.items.length} 项。`
+                : `已展示前 8 项，共 ${result.items.length} 项。`}
+            </div>
+            <Button
+              type='button'
+              size='sm'
+              variant='ghost'
+              className='h-7 gap-1 px-2 text-xs'
+              onClick={() => setExpanded((current) => !current)}
+            >
+              {expanded ? <ChevronUp /> : <ChevronDown />}
+              {expanded ? '收起' : '展开全部'}
+            </Button>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+export function OaWorkItemDetailCard({
+  item,
+  message,
+}: {
+  item: Record<string, unknown>
+  message?: string
+}) {
+  const title =
+    readText(item.title) ||
+    readText(item.code) ||
+    readText(item.id) ||
+    '工作项详情'
+  const type = readText(item.type) || readText(item.workItemType)
+  const priority = readText(item.priorityLabel) || readText(item.priority)
+  const status = readText(item.statusLabel) || readText(item.status)
+  const project =
+    readText(item.projectName) ||
+    readText(item.projectTitle) ||
+    readText(item.project)
+  const owner =
+    readText(item.personChargeName) ||
+    readText(item.ownerName) ||
+    readText(item.assigneeName)
+  const dueDate =
+    readText(item.dueDate) ||
+    readText(item.planEndDate) ||
+    readText(item.endDate)
+  const overdue = readBoolean(item.overdue) === true
+
+  return (
+    <Card className='w-full max-w-2xl gap-4 rounded-lg py-4 shadow-none'>
+      <CardHeader className='gap-3 px-4 sm:px-5'>
+        <div className='flex items-start gap-3'>
+          <IconFrame icon={ClipboardList} />
+          <div className='min-w-0 flex-1'>
+            <div className='flex min-w-0 flex-wrap items-center gap-2'>
+              {type ? (
+                <Badge variant='outline'>{formatWorkItemType(type)}</Badge>
+              ) : null}
+              {overdue ? <Badge variant='destructive'>已逾期</Badge> : null}
+              <CardTitle className='min-w-0 text-base break-words'>
+                {title}
+              </CardTitle>
+            </div>
+            <CardDescription className='mt-1'>
+              {message || '已读取 OA 中的最新工作项详情。'}
+            </CardDescription>
+          </div>
+          <CardAction>
+            <Badge variant='secondary'>详情</Badge>
+          </CardAction>
+        </div>
+      </CardHeader>
+      <CardContent className='grid gap-2 px-4 sm:grid-cols-3 sm:px-5'>
+        <OaMetric label='优先级' value={priority || '-'} />
+        <OaMetric label='状态' value={status || '-'} />
+        <OaMetric label='项目' value={project || '-'} />
+        {owner ? <OaMetric label='负责人' value={owner} /> : null}
+        {dueDate ? (
+          <OaMetric label='截止日期' value={formatDateText(dueDate)} />
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+function WorkItemRow({ item }: { item: Record<string, unknown> }) {
+  const aui = useAui()
+  const referenceTitle =
+    readText(item.title) || readText(item.name) || readText(item.subject) || ''
+  const title = referenceTitle || readText(item.id) || '未命名工作项'
+  const reference = readText(item.code) || referenceTitle
+  const type = readText(item.type) || readText(item.workItemType) || ''
+  const status = readText(item.status) || readText(item.state)
+  const project =
+    readText(item.projectTitle) ||
+    readText(item.projectName) ||
+    readText(item.project)
+  const owner =
+    readText(item.personChargeName) ||
+    readText(item.ownerName) ||
+    readText(item.assigneeName)
+  const dueDate =
+    readText(item.dueDate) ||
+    readText(item.planEndDate) ||
+    readText(item.endDate)
+  const overdue = readBoolean(item.overdue) === true
+  const canOpenDetail =
+    Boolean(reference) && ['task', 'bug'].includes(type.toLowerCase())
+
+  const openDetail = () => {
+    if (!canOpenDetail || aui.thread().getState().isRunning) return
+    const safeReference = reference.replace(/["'“”‘’「」『』\n\r]/g, ' ').trim()
+    const kind = type.toLowerCase() === 'bug' ? '缺陷' : '任务'
+    aui.thread().append({
+      content: [
+        { type: 'text', text: `查看${kind}「${safeReference}」的详细信息` },
+      ],
+      runConfig: aui.composer().getState().runConfig,
+    })
+  }
+
+  return (
+    <div className='border-border/70 flex flex-col gap-2 border-b px-3 py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between'>
+      <div className='min-w-0 flex-1'>
+        <div className='flex min-w-0 flex-wrap items-center gap-2'>
+          {type ? (
+            <Badge variant='outline'>{formatWorkItemType(type)}</Badge>
+          ) : null}
+          {overdue ? <Badge variant='destructive'>已逾期</Badge> : null}
+          <div className='truncate text-sm font-medium'>{title}</div>
+        </div>
+        <div className='text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+          {project ? <span>{project}</span> : null}
+          {owner ? <span>负责人 {owner}</span> : null}
+          {dueDate ? <span>截止 {formatDateText(dueDate)}</span> : null}
+        </div>
+      </div>
+      <div className='flex shrink-0 items-center gap-2 self-start sm:self-center'>
+        {status ? <Badge variant='secondary'>{status}</Badge> : null}
+        {canOpenDetail ? (
+          <TooltipIconButton
+            tooltip='查看详情'
+            type='button'
+            variant='ghost'
+            size='icon'
+            className='size-7'
+            aria-label={`查看${title}的详情`}
+            onClick={openDetail}
+          >
+            <Eye className='size-4' />
+          </TooltipIconButton>
+        ) : null}
+      </div>
+    </div>
+  )
+}

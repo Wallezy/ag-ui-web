@@ -1,0 +1,8 @@
+*
+!dist/
+!dist/**
+!Dockerfile
+!nginx.conf
+
+**/.DS_Store
+**/*.log

@@ -1,0 +1,832 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  AssistantRuntimeProvider,
+  type ThreadHistoryAdapter,
+  type ThreadMessage,
+} from '@assistant-ui/react'
+import { useAgUiRuntime } from '@assistant-ui/react-ag-ui'
+import {
+  Bot,
+  CloudSun,
+  Eraser,
+  FolderKanban,
+  Home,
+  LoaderCircle,
+  LogIn,
+  LogOut,
+  MessageSquarePlus,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RefreshCw,
+  ShieldAlert,
+  Trash2,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Separator } from '@/components/ui/separator'
+import {
+  Thread,
+  type ThreadQuickAction,
+} from '@/components/assistant-ui/thread'
+import { Header } from '@/components/layout/header'
+import { Main } from '@/components/layout/main'
+import { ThemeSwitch } from '@/components/theme-switch'
+import {
+  AGUI_RUN_URL,
+  DEFAULT_AGENT_RUN_ERROR_MESSAGE,
+  agentById,
+  apiFetch,
+  checkOaSession,
+  clearConversations,
+  createConversation,
+  deleteConversation,
+  loadConversationMessages,
+  listConversations,
+  redirectToOaLogin,
+  type AgentConfig,
+} from './api'
+import { classifyOaSessionFailure } from './api-error'
+import { AgentClarificationCard } from './clarification-card'
+import {
+  DevelopmentDiagnostics,
+  type CurrentTaskDiagnostics,
+} from './development-diagnostics'
+import {
+  AgentExecutionProgress,
+  AgentExecutionProgressGroup,
+} from './execution-progress'
+import { RuntimeHttpAgent } from './runtime-http-agent'
+import { AgentToolFallback, AgentToolGroup } from './tool-ui'
+import type { AgentId, ConversationSummary } from './types'
+
+type RefreshOptions = {
+  keepSelection?: boolean
+  quiet?: boolean
+}
+
+type OaSessionState = 'checking' | 'ready' | 'login-required' | 'unavailable'
+
+const ADMIN_PORTAL_URL = '/app/admin/#/portal'
+const OA_LOGOUT_URL = '/auth/token/logout'
+const PROJECT_MANAGER_QUICK_ACTIONS: ThreadQuickAction[] = [
+  {
+    title: '填工时',
+    prompt: '我要填工时',
+  },
+  {
+    title: '写日报',
+    prompt: '我要写日报',
+  },
+]
+const EMPTY_TASK_DIAGNOSTICS: CurrentTaskDiagnostics = {
+  traceId: null,
+  taskId: null,
+  taskVersion: -1,
+  schemaVersion: null,
+}
+
+export function AgentWorkspace({
+  initialAgentId,
+}: {
+  initialAgentId: AgentId
+}) {
+  const activeAgentId = initialAgentId
+  const requiresOaSession = activeAgentId === 'projectManagerAgent'
+  const [activeConversationId, setActiveConversationId] = useState<
+    string | null
+  >(null)
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false)
+  const [isCreatingConversation, setIsCreatingConversation] = useState(false)
+  const [isClearingConversations, setIsClearingConversations] = useState(false)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false)
+  const [deletingConversationIds, setDeletingConversationIds] = useState<
+    Set<string>
+  >(() => new Set())
+  const [conversationError, setConversationError] = useState<string | null>(
+    null
+  )
+  const [oaSessionState, setOaSessionState] = useState<OaSessionState>(
+    requiresOaSession ? 'checking' : 'ready'
+  )
+  const [oaSessionMessage, setOaSessionMessage] = useState<string | null>(null)
+  const [oaSessionCheckVersion, setOaSessionCheckVersion] = useState(0)
+  const [taskDiagnostics, setTaskDiagnostics] =
+    useState<CurrentTaskDiagnostics>(EMPTY_TASK_DIAGNOSTICS)
+  const [historyCollapsed, setHistoryCollapsed] = useState(false)
+  const refreshTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(
+    null
+  )
+
+  const activeAgent = useMemo(() => agentById(activeAgentId), [activeAgentId])
+
+  const activeConversations = useMemo(
+    () =>
+      conversations.filter(
+        (conversation) => conversation.agentId === activeAgentId
+      ),
+    [activeAgentId, conversations]
+  )
+
+  const refreshConversations = useCallback(
+    async ({ keepSelection = true, quiet = false }: RefreshOptions = {}) => {
+      if (!quiet) setIsLoadingConversations(true)
+      setConversationError(null)
+
+      try {
+        const next = await listConversations(activeAgent)
+        const nextForAgent = next.filter(
+          (conversation) => conversation.agentId === activeAgentId
+        )
+
+        setConversations(next)
+        setActiveConversationId((current) => {
+          if (
+            keepSelection &&
+            current &&
+            nextForAgent.some((conversation) => conversation.id === current)
+          ) {
+            return current
+          }
+          return nextForAgent[0]?.id ?? null
+        })
+      } catch {
+        setConversationError('会话加载失败')
+      } finally {
+        if (!quiet) setIsLoadingConversations(false)
+      }
+    },
+    [activeAgent, activeAgentId]
+  )
+
+  useEffect(() => {
+    if (!requiresOaSession) {
+      setOaSessionState('ready')
+      setOaSessionMessage(null)
+      return
+    }
+
+    let cancelled = false
+    let redirectTimer: ReturnType<typeof window.setTimeout> | null = null
+
+    setOaSessionState('checking')
+    setOaSessionMessage(null)
+
+    void checkOaSession()
+      .then((session) => {
+        if (cancelled) return
+        if (session.authenticated) {
+          setOaSessionState('ready')
+          return
+        }
+
+        setOaSessionState('login-required')
+        setOaSessionMessage(
+          session.message || '当前未登录，正在跳转到现有系统登录页'
+        )
+        redirectTimer = window.setTimeout(() => redirectToOaLogin(), 500)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        const failure = classifyOaSessionFailure(error)
+        setOaSessionState(failure.kind)
+        setOaSessionMessage(failure.message)
+        if (failure.kind === 'login-required') {
+          redirectTimer = window.setTimeout(() => redirectToOaLogin(), 500)
+        }
+      })
+
+    return () => {
+      cancelled = true
+      if (redirectTimer) window.clearTimeout(redirectTimer)
+    }
+  }, [oaSessionCheckVersion, requiresOaSession])
+
+  const canLoadConversations = !requiresOaSession || oaSessionState === 'ready'
+
+  useEffect(() => {
+    if (!canLoadConversations) return
+    void refreshConversations({ keepSelection: true })
+  }, [canLoadConversations, refreshConversations])
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) {
+        window.clearTimeout(refreshTimerRef.current)
+      }
+    }
+  }, [])
+
+  const handleCreateConversation = useCallback(async () => {
+    if (requiresOaSession && oaSessionState !== 'ready') {
+      if (oaSessionState === 'login-required') {
+        redirectToOaLogin()
+      }
+      return
+    }
+
+    setIsCreatingConversation(true)
+    setConversationError(null)
+
+    try {
+      const created = await createConversation(activeAgent)
+      setConversations((current) => [
+        created,
+        ...current.filter((conversation) => conversation.id !== created.id),
+      ])
+      setActiveConversationId(created.id)
+    } catch {
+      setConversationError('会话创建失败')
+    } finally {
+      setIsCreatingConversation(false)
+    }
+  }, [activeAgent, oaSessionState, requiresOaSession])
+
+  const handleClearConversations = useCallback(async () => {
+    if (conversations.length === 0 || isClearingConversations) return
+    const confirmed = window.confirm('确认清空当前智能体的历史会话吗？')
+    if (!confirmed) return
+
+    setIsClearingConversations(true)
+    setConversationError(null)
+
+    try {
+      await clearConversations(activeAgent)
+      setConversations([])
+      setActiveConversationId(null)
+    } catch {
+      setConversationError('历史会话清空失败')
+    } finally {
+      setIsClearingConversations(false)
+    }
+  }, [activeAgent, conversations.length, isClearingConversations])
+
+  const handleDeleteConversation = useCallback(
+    async (conversationId: string) => {
+      if (deletingConversationIds.has(conversationId)) return
+      const confirmed = window.confirm('确认删除这条历史会话吗？')
+      if (!confirmed) return
+
+      setDeletingConversationIds((current) => {
+        const next = new Set(current)
+        next.add(conversationId)
+        return next
+      })
+      setConversationError(null)
+
+      try {
+        await deleteConversation(conversationId, activeAgent)
+        await refreshConversations({ keepSelection: true, quiet: true })
+      } catch {
+        setConversationError('历史会话删除失败')
+      } finally {
+        setDeletingConversationIds((current) => {
+          const next = new Set(current)
+          next.delete(conversationId)
+          return next
+        })
+      }
+    },
+    [activeAgent, deletingConversationIds, refreshConversations]
+  )
+
+  const handleConversationActivity = useCallback(() => {
+    if (refreshTimerRef.current) {
+      window.clearTimeout(refreshTimerRef.current)
+    }
+    refreshTimerRef.current = window.setTimeout(() => {
+      void refreshConversations({ keepSelection: true, quiet: true })
+    }, 800)
+  }, [refreshConversations])
+
+  const handleGoPortal = useCallback(() => {
+    window.location.assign(ADMIN_PORTAL_URL)
+  }, [])
+
+  useEffect(() => {
+    setTaskDiagnostics(EMPTY_TASK_DIAGNOSTICS)
+  }, [activeConversationId])
+
+  const handleLogout = useCallback(async () => {
+    if (isLoggingOut) return
+
+    setIsLoggingOut(true)
+    try {
+      await window.fetch(OA_LOGOUT_URL, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+    } catch {
+      // Leave the Agent UI even when the OA session is already invalid.
+    } finally {
+      setIsLogoutDialogOpen(false)
+      redirectToOaLogin()
+    }
+  }, [isLoggingOut])
+
+  return (
+    <>
+      <Header fixed className='border-b'>
+        <div className='flex min-w-0 flex-1 items-center gap-3'>
+          <div className='bg-primary text-primary-foreground flex size-8 items-center justify-center rounded-md'>
+            <Bot />
+          </div>
+          <div className='min-w-0'>
+            <h1 className='truncate text-sm font-semibold'>智能体工作台</h1>
+            <p className='text-muted-foreground truncate text-xs'>
+              {activeAgent.description}
+            </p>
+          </div>
+        </div>
+        <div className='ms-auto flex items-center gap-2'>
+          <DevelopmentDiagnostics task={taskDiagnostics} />
+          <Button
+            size='sm'
+            variant='ghost'
+            aria-label='返回主页面'
+            onClick={handleGoPortal}
+          >
+            <Home data-icon='inline-start' />
+            <span className='hidden sm:inline'>主页面</span>
+          </Button>
+          <Button
+            size='sm'
+            variant='ghost'
+            aria-label='退出登录'
+            disabled={isLoggingOut}
+            onClick={() => setIsLogoutDialogOpen(true)}
+          >
+            {isLoggingOut ? (
+              <LoaderCircle data-icon='inline-start' className='animate-spin' />
+            ) : (
+              <LogOut data-icon='inline-start' />
+            )}
+            <span className='hidden sm:inline'>退出</span>
+          </Button>
+          <ThemeSwitch />
+        </div>
+      </Header>
+
+      <Dialog
+        open={isLogoutDialogOpen}
+        onOpenChange={(open) => {
+          if (!isLoggingOut) setIsLogoutDialogOpen(open)
+        }}
+      >
+        <DialogContent showCloseButton={!isLoggingOut}>
+          <DialogHeader>
+            <DialogTitle>确认退出登录？</DialogTitle>
+            <DialogDescription>
+              退出后将清理当前登录态，并跳转到登录页面。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type='button'
+              variant='outline'
+              disabled={isLoggingOut}
+              onClick={() => setIsLogoutDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type='button'
+              variant='destructive'
+              disabled={isLoggingOut}
+              onClick={handleLogout}
+            >
+              {isLoggingOut ? (
+                <LoaderCircle
+                  data-icon='inline-start'
+                  className='animate-spin'
+                />
+              ) : (
+                <LogOut data-icon='inline-start' />
+              )}
+              {isLoggingOut ? '正在退出' : '确认退出'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Main fixed fluid className='p-0'>
+        <div
+          className={cn(
+            'grid min-h-0 flex-1 grid-cols-1',
+            historyCollapsed
+              ? 'md:grid-cols-[3.5rem_minmax(0,1fr)]'
+              : 'md:grid-cols-[16rem_minmax(0,1fr)]'
+          )}
+        >
+          <aside className='bg-sidebar/60 hidden min-h-0 border-e md:flex md:flex-col'>
+            <div
+              className={cn(
+                'flex h-14 items-center gap-1.5',
+                historyCollapsed ? 'justify-center px-2' : 'px-3'
+              )}
+            >
+              <Button
+                size='icon'
+                variant='ghost'
+                aria-label={historyCollapsed ? '展开历史会话' : '收起历史会话'}
+                onClick={() => setHistoryCollapsed((current) => !current)}
+              >
+                {historyCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+              </Button>
+              <div
+                className={cn('min-w-0 flex-1', historyCollapsed && 'hidden')}
+              >
+                <div className='truncate text-sm font-medium'>历史会话</div>
+                <div className='text-muted-foreground truncate text-xs'>
+                  后端会话
+                </div>
+              </div>
+              <Button
+                size='icon'
+                variant='ghost'
+                aria-label='清空历史会话'
+                className={cn(historyCollapsed && 'hidden')}
+                disabled={
+                  isClearingConversations ||
+                  isLoadingConversations ||
+                  (requiresOaSession && oaSessionState !== 'ready') ||
+                  conversations.length === 0
+                }
+                onClick={handleClearConversations}
+              >
+                {isClearingConversations ? (
+                  <LoaderCircle className='animate-spin' />
+                ) : (
+                  <Eraser />
+                )}
+              </Button>
+              <Button
+                size='icon'
+                variant='ghost'
+                aria-label='新建会话'
+                className={cn(historyCollapsed && 'hidden')}
+                disabled={
+                  isCreatingConversation ||
+                  (requiresOaSession && oaSessionState !== 'ready')
+                }
+                onClick={handleCreateConversation}
+              >
+                {isCreatingConversation ? (
+                  <LoaderCircle className='animate-spin' />
+                ) : (
+                  <MessageSquarePlus />
+                )}
+              </Button>
+            </div>
+            <Separator className={cn(historyCollapsed && 'hidden')} />
+            <div
+              className={cn(
+                'min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto',
+                historyCollapsed && 'hidden'
+              )}
+            >
+              <div className='flex w-full min-w-0 flex-col gap-1 p-2'>
+                {conversationError ? (
+                  <div className='text-destructive px-3 py-2 text-xs'>
+                    {conversationError}
+                  </div>
+                ) : null}
+
+                {isLoadingConversations ? (
+                  <ConversationListLoading />
+                ) : activeConversations.length > 0 ? (
+                  activeConversations.map((conversation) => (
+                    <ConversationButton
+                      key={conversation.id}
+                      conversation={conversation}
+                      active={activeConversationId === conversation.id}
+                      deleting={deletingConversationIds.has(conversation.id)}
+                      onClick={() => setActiveConversationId(conversation.id)}
+                      onDelete={() =>
+                        void handleDeleteConversation(conversation.id)
+                      }
+                    />
+                  ))
+                ) : (
+                  <div className='text-muted-foreground px-3 py-8 text-center text-xs'>
+                    暂无会话
+                  </div>
+                )}
+              </div>
+            </div>
+          </aside>
+
+          <section className='bg-background min-h-0'>
+            {requiresOaSession && oaSessionState !== 'ready' ? (
+              <OaSessionStateView
+                state={oaSessionState}
+                message={oaSessionMessage}
+                onRetry={() =>
+                  setOaSessionCheckVersion((current) => current + 1)
+                }
+              />
+            ) : activeConversationId ? (
+              <AgentThread
+                key={`${activeAgent.id}:${activeConversationId}`}
+                agent={activeAgent}
+                conversationId={activeConversationId}
+                onConversationActivity={handleConversationActivity}
+                onTaskDiagnostics={setTaskDiagnostics}
+                quickActions={
+                  activeAgent.id === 'projectManagerAgent'
+                    ? PROJECT_MANAGER_QUICK_ACTIONS
+                    : undefined
+                }
+              />
+            ) : (
+              <EmptyConversationState
+                agent={activeAgent}
+                isCreating={isCreatingConversation}
+                onCreate={handleCreateConversation}
+              />
+            )}
+          </section>
+        </div>
+      </Main>
+    </>
+  )
+}
+
+function AgentThread({
+  agent: activeAgent,
+  conversationId,
+  onConversationActivity,
+  onTaskDiagnostics,
+  quickActions,
+}: {
+  agent: AgentConfig
+  conversationId: string
+  onConversationActivity: () => void
+  onTaskDiagnostics: (diagnostics: CurrentTaskDiagnostics) => void
+  quickActions?: ThreadQuickAction[]
+}) {
+  const agent = useMemo(
+    () =>
+      new RuntimeHttpAgent({
+        url: AGUI_RUN_URL,
+        agentId: activeAgent.backendAgentId,
+        threadId: conversationId,
+        fetch: apiFetch,
+        headers: {
+          'x-agent-platform-agent-id': activeAgent.backendAgentId,
+          'x-agent-platform-resource-id': 'local-user',
+        },
+      }),
+    [activeAgent.backendAgentId, conversationId]
+  )
+
+  const history = useMemo<ThreadHistoryAdapter>(
+    () => ({
+      load: async () => {
+        const messages = await loadConversationMessages(
+          conversationId,
+          activeAgent
+        )
+        return toMessageRepository(messages)
+      },
+      append: async () => {
+        onConversationActivity()
+      },
+    }),
+    [activeAgent, conversationId, onConversationActivity]
+  )
+
+  const handleRunError = useCallback(() => {
+    toast.error(DEFAULT_AGENT_RUN_ERROR_MESSAGE, {
+      id: 'agent-run-error',
+    })
+    onConversationActivity()
+  }, [onConversationActivity])
+
+  const runtime = useAgUiRuntime({
+    agent,
+    adapters: { history },
+    onError: handleRunError,
+  })
+
+  useEffect(() => {
+    const publish = () => {
+      const state = agent.taskViewStore.getSnapshot()
+      onTaskDiagnostics({
+        traceId: state.traceId,
+        taskId: state.taskId,
+        taskVersion: state.taskVersion,
+        schemaVersion: state.schemaVersion,
+      })
+    }
+    publish()
+    const unsubscribe = agent.taskViewStore.subscribe(publish)
+    return () => {
+      unsubscribe()
+    }
+  }, [agent, onTaskDiagnostics])
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <div className='flex h-full min-h-0 flex-col [--agent-reading-max-width:56rem] [--agent-shell-max-width:72rem]'>
+        <div className='min-h-0 flex-1'>
+          <Thread
+            interaction={<AgentClarificationCard agent={agent} />}
+            components={{
+              Reasoning: AgentExecutionProgress,
+              ReasoningGroup: AgentExecutionProgressGroup,
+              ToolFallback: AgentToolFallback,
+              ToolGroup: AgentToolGroup,
+            }}
+            quickActions={quickActions}
+          />
+        </div>
+      </div>
+    </AssistantRuntimeProvider>
+  )
+}
+
+function ConversationButton({
+  conversation,
+  active,
+  deleting,
+  onClick,
+  onDelete,
+}: {
+  conversation: ConversationSummary
+  active: boolean
+  deleting: boolean
+  onClick: () => void
+  onDelete: () => void
+}) {
+  return (
+    <div className='group relative rounded-md'>
+      <button
+        type='button'
+        onClick={onClick}
+        className={cn(
+          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground flex w-full flex-col gap-1 rounded-md py-2 ps-3 pe-10 text-start transition-colors',
+          active && 'bg-sidebar-accent text-sidebar-accent-foreground'
+        )}
+      >
+        <div className='flex w-full min-w-0 items-center gap-2'>
+          <span className='min-w-0 flex-1 truncate text-sm font-medium'>
+            {conversation.title}
+          </span>
+          <span
+            className='text-muted-foreground shrink-0 text-xs whitespace-nowrap tabular-nums'
+            title={conversation.updatedAt}
+          >
+            {conversation.updatedAt}
+          </span>
+        </div>
+        <div className='text-muted-foreground line-clamp-2 text-xs'>
+          {conversation.lastMessage}
+        </div>
+        {conversation.status === 'running' ? (
+          <div className='flex items-center gap-2'>
+            <Badge variant='outline' className='w-fit'>
+              运行中
+            </Badge>
+          </div>
+        ) : null}
+      </button>
+      <Button
+        type='button'
+        size='icon'
+        variant='ghost'
+        aria-label='删除会话'
+        disabled={deleting}
+        onClick={(event) => {
+          event.stopPropagation()
+          onDelete()
+        }}
+        className={cn(
+          'text-destructive hover:bg-destructive/10 hover:text-destructive absolute top-1 right-1 size-7 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
+          deleting && 'opacity-100'
+        )}
+      >
+        {deleting ? <LoaderCircle className='animate-spin' /> : <Trash2 />}
+      </Button>
+    </div>
+  )
+}
+
+function ConversationListLoading() {
+  return (
+    <div className='flex flex-col gap-2 px-2 py-1'>
+      {Array.from({ length: 3 }).map((_, index) => (
+        <div key={index} className='flex flex-col gap-2 rounded-md px-1 py-2'>
+          <div className='bg-muted h-4 w-3/4 rounded' />
+          <div className='bg-muted h-3 w-full rounded' />
+          <div className='bg-muted h-3 w-1/2 rounded' />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function OaSessionStateView({
+  state,
+  message,
+  onRetry,
+}: {
+  state: Exclude<OaSessionState, 'ready'>
+  message: string | null
+  onRetry: () => void
+}) {
+  const checking = state === 'checking'
+  const loginRequired = state === 'login-required'
+
+  return (
+    <div className='flex h-full items-center justify-center p-6'>
+      <div className='flex w-full max-w-md flex-col items-center gap-4 text-center'>
+        <div className='bg-primary/10 text-primary flex size-12 items-center justify-center rounded-lg'>
+          {checking ? (
+            <LoaderCircle className='animate-spin' />
+          ) : (
+            <ShieldAlert />
+          )}
+        </div>
+        <div className='space-y-1'>
+          <h2 className='text-lg font-semibold'>
+            {checking
+              ? '正在确认 OA 登录态'
+              : loginRequired
+                ? '需要登录 OA'
+                : 'Agent 服务暂不可用'}
+          </h2>
+          <p className='text-muted-foreground text-sm'>
+            {message || '正在确认当前登录态'}
+          </p>
+        </div>
+        {loginRequired ? (
+          <Button onClick={() => redirectToOaLogin()}>
+            <LogIn />
+            去登录
+          </Button>
+        ) : state === 'unavailable' ? (
+          <Button variant='outline' onClick={onRetry}>
+            <RefreshCw />
+            重新检测
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function EmptyConversationState({
+  agent,
+  isCreating,
+  onCreate,
+}: {
+  agent: AgentConfig
+  isCreating: boolean
+  onCreate: () => void
+}) {
+  const Icon = agent.id === 'projectManagerAgent' ? FolderKanban : CloudSun
+
+  return (
+    <div className='flex h-full items-center justify-center p-6'>
+      <div className='flex w-full max-w-md flex-col items-center gap-4 text-center'>
+        <div className='bg-primary/10 text-primary flex size-12 items-center justify-center rounded-lg'>
+          <Icon />
+        </div>
+        <div className='space-y-1'>
+          <h2 className='text-lg font-semibold'>{agent.emptyTitle}</h2>
+          <p className='text-muted-foreground text-sm'>{agent.emptyMessage}</p>
+        </div>
+        <Button onClick={onCreate} disabled={isCreating}>
+          {isCreating ? (
+            <LoaderCircle className='animate-spin' />
+          ) : (
+            <MessageSquarePlus />
+          )}
+          新建会话
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function toMessageRepository(messages: ThreadMessage[]) {
+  return {
+    headId: messages.at(-1)?.id ?? null,
+    messages: messages.map((message, index) => ({
+      message,
+      parentId: index === 0 ? null : (messages[index - 1]?.id ?? null),
+    })),
+  }
+}

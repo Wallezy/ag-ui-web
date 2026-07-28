@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/contracts/oa-public-agent-event-v3.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "traceId", "runId", "taskId", "taskVersion", "eventType", "occurredAt", "payload"],
+  "properties": {
+    "schemaVersion": { "const": 3 },
+    "eventId": { "$ref": "#/$defs/identifier" },
+    "traceId": { "$ref": "#/$defs/identifier" },
+    "runId": { "$ref": "#/$defs/identifier" },
+    "taskId": { "$ref": "#/$defs/identifier" },
+    "taskVersion": { "type": "integer", "minimum": 0 },
+    "eventType": { "type": "string", "pattern": "^OA_[A-Z_]+$" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "payload": {
+      "type": "object",
+      "required": ["reasonCode", "displayMessage"],
+      "properties": {
+        "reasonCode": { "$ref": "#/$defs/identifier" },
+        "displayMessage": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "status": { "$ref": "#/$defs/identifier" },
+        "selectedIntentId": { "$ref": "#/$defs/identifier" },
+        "fields": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 120 } },
+        "slots": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/slot" } }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,160}$" },
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "label", "valueSummary", "source", "status", "critical", "editable", "conflictReason"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "valueSummary": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "source": { "$ref": "#/$defs/identifier" },
+        "status": { "$ref": "#/$defs/identifier" },
+        "critical": { "type": "boolean" },
+        "editable": { "type": "boolean" },
+        "conflictReason": { "type": "string", "maxLength": 160 }
+      }
+    }
+  }
+}

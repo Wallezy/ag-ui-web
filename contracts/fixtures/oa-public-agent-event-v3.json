@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 3,
+  "eventId": "event-understanding-1",
+  "traceId": "trace-1",
+  "runId": "run-1",
+  "taskId": "task-1",
+  "taskVersion": 2,
+  "eventType": "OA_UNDERSTANDING_READY",
+  "occurredAt": "2026-07-25T12:00:00Z",
+  "payload": {
+    "reasonCode": "SERVER_UNDERSTANDING_READY",
+    "displayMessage": "已更新对当前任务的理解。",
+    "status": "RUNNING",
+    "selectedIntentId": "WORK_ITEM_QUERY",
+    "fields": ["assigneeName"],
+    "slots": [{
+      "name": "assigneeName",
+      "label": "人员",
+      "valueSummary": "王翔",
+      "source": "USER_CORRECTION",
+      "status": "GROUNDED",
+      "critical": true,
+      "editable": true,
+      "conflictReason": ""
+    }]
+  }
+}

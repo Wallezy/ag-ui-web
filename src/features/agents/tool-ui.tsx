@@ -1,0 +1,549 @@
+import { Children, useState, type PropsWithChildren } from 'react'
+import {
+  type ToolCallMessagePartComponent,
+  useAuiState,
+} from '@assistant-ui/react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardList,
+  Clock3,
+  FileText,
+  LoaderCircle,
+  LogIn,
+  Send,
+  ShieldAlert,
+  XCircle,
+  type LucideIcon,
+} from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import type { ThreadGroupPart } from '@/components/assistant-ui/thread'
+import {
+  ToolGroupContent,
+  ToolGroupRoot,
+  ToolGroupTrigger,
+} from '@/components/assistant-ui/tool-group'
+import { redirectToOaLogin, type MissingWorkHourItem } from './api'
+import { dailyReportErrorMessage } from './daily-report'
+import { visibleToolGroupPositions } from './tool-retry-data'
+import { parseDailyReportDraftResult } from './tool-ui/daily-report-model'
+import {
+  OaDailyReportDraftCard,
+  OaDailyReportStatusCard,
+} from './tool-ui/daily-report-ui'
+import { IconFrame } from './tool-ui/primitives'
+import { isRecord, parseJson, readBoolean, readString } from './tool-ui/shared'
+import {
+  oaToolNames,
+  parseOaToolResult,
+  publicToolMessage,
+  safeToolFallbackPresentation,
+  weatherToolNames,
+  type OaToolResult,
+  type SafeToolFallbackPresentation,
+} from './tool-ui/tool-presentation'
+import { parseWeatherResult, readLocation } from './tool-ui/weather-data'
+import { WeatherToolCard, WeatherToolLoadingCard } from './tool-ui/weather-ui'
+import { readMissingWorkHourItems } from './tool-ui/work-hour-data'
+import { parseUserWorkHoursResult } from './tool-ui/work-hour-query-data'
+import { OaUserWorkHoursCard } from './tool-ui/work-hour-query-ui'
+import { WorkHourFillActionCard } from './tool-ui/work-hour-ui'
+import { OaWorkItemDetailCard, OaWorkItemsCard } from './tool-ui/work-items-ui'
+import { workHourErrorMessage } from './work-hour'
+import { parseWorkItemsResult } from './work-items-result'
+
+type OaLoginRequiredResult = {
+  message: string
+}
+
+type WorkHourFillActionResult = {
+  workDate?: string
+  items: MissingWorkHourItem[]
+  confirmationContext?: Record<string, unknown>
+}
+
+function WorkHourFillResultCard({
+  action,
+  message,
+}: {
+  action: WorkHourFillActionResult
+  message?: string
+}) {
+  const [preparedDailyReport, setPreparedDailyReport] = useState<{
+    draft: NonNullable<ReturnType<typeof parseDailyReportDraftResult>>
+    message?: string
+  } | null>(null)
+
+  if (preparedDailyReport) {
+    return (
+      <OaDailyReportDraftCard
+        draft={preparedDailyReport.draft}
+        message={preparedDailyReport.message}
+      />
+    )
+  }
+
+  return (
+    <WorkHourFillActionCard
+      items={action.items}
+      workDate={action.workDate}
+      confirmationContext={action.confirmationContext}
+      message={message}
+      title='填工时'
+      onDailyReportPrepared={(draft, preparedMessage) =>
+        setPreparedDailyReport({ draft, message: preparedMessage })
+      }
+    />
+  )
+}
+
+const OA_LOGIN_REQUIRED = 'OA_LOGIN_REQUIRED'
+
+const oaToolCopy: Record<
+  string,
+  { title: string; running: string; badge: string; icon: LucideIcon }
+> = {
+  getMyWorkItems: {
+    title: '查询 OA 工作项',
+    running: '正在按成员、项目和日期读取有权查看的任务与缺陷。',
+    badge: 'Work Items',
+    icon: ClipboardList,
+  },
+  getUserWorkHours: {
+    title: '查询登记工时',
+    running: '正在按成员和日期汇总已登记工时。',
+    badge: 'Work Hours',
+    icon: Clock3,
+  },
+  getWorkItemDetail: {
+    title: '查询工作项详情',
+    running: '正在读取工作项详情。',
+    badge: 'Detail',
+    icon: ClipboardList,
+  },
+  generateDailyReportDraft: {
+    title: '准备今日日报',
+    running: '正在读取今天的 OA 日报和工作记录。',
+    badge: 'Daily Report',
+    icon: FileText,
+  },
+  getActiveDailyReportDraft: {
+    title: '读取今天的日报',
+    running: '正在读取今天在 OA 中的日报。',
+    badge: 'Daily Report',
+    icon: FileText,
+  },
+  prepareWorkHourFill: {
+    title: '填工时',
+    running: '正在读取可填工时的任务和缺陷。',
+    badge: 'Work Hours',
+    icon: Clock3,
+  },
+  saveWorkHourExecution: {
+    title: '保存登记工时',
+    running: '正在保存已确认的工时。',
+    badge: 'Work Hours',
+    icon: Clock3,
+  },
+  queryDailyReportStatus: {
+    title: '读取日报详情',
+    running: '正在读取 OA 中的日报详情。',
+    badge: 'Daily Report',
+    icon: FileText,
+  },
+  submitDailyReport: {
+    title: '提交日报',
+    running: '正在提交确认后的日报。',
+    badge: 'Submit',
+    icon: Send,
+  },
+}
+
+export function AgentToolGroup({
+  group,
+  children,
+}: PropsWithChildren<{ group: ThreadGroupPart }>) {
+  const messageParts = useAuiState((state) => state.message.parts)
+  const childArray = Children.toArray(children)
+  const visiblePositions = new Set(
+    visibleToolGroupPositions(messageParts, group.indices)
+  )
+  const visibleChildren = childArray.filter((_, index) =>
+    visiblePositions.has(index)
+  )
+  if (visibleChildren.length === 0) return null
+
+  return (
+    <ToolGroupRoot variant='ghost' defaultOpen>
+      <ToolGroupTrigger
+        count={visibleChildren.length}
+        active={group.status.type === 'running'}
+      />
+      <ToolGroupContent>{visibleChildren}</ToolGroupContent>
+    </ToolGroupRoot>
+  )
+}
+
+export const AgentToolFallback: ToolCallMessagePartComponent = (props) => {
+  const loginRequired = parseOaLoginRequired(props.result)
+  if (loginRequired) {
+    return <OaLoginRequiredCard message={loginRequired.message} />
+  }
+
+  const oaResult = parseOaToolResult(props.result, props.toolName)
+  if (oaResult) {
+    return <OaToolResultCard result={oaResult} />
+  }
+
+  if (oaToolNames.has(props.toolName)) {
+    if (props.status?.type === 'running' || props.result === undefined) {
+      return <OaToolLoadingCard toolName={props.toolName} />
+    }
+
+    return <SafeToolStatus presentation={safeToolFallbackPresentation(props)} />
+  }
+
+  if (!weatherToolNames.has(props.toolName)) {
+    return <SafeToolStatus presentation={safeToolFallbackPresentation(props)} />
+  }
+
+  const result = parseWeatherResult(props.result)
+
+  if (!result) {
+    if (props.status?.type === 'running' || props.result === undefined) {
+      return <WeatherToolLoadingCard location={readLocation(props.args)} />
+    }
+
+    return <SafeToolStatus presentation={safeToolFallbackPresentation(props)} />
+  }
+
+  return <WeatherToolCard weather={result} />
+}
+
+function OaToolResultCard({ result }: { result: OaToolResult }) {
+  if (result.toolName === 'getMyWorkItems') {
+    const workItems = parseWorkItemsResult(result.result)
+    if (workItems) {
+      return <OaWorkItemsCard result={workItems} message={result.message} />
+    }
+  }
+
+  if (result.success === false || result.errorCode) {
+    return <OaErrorCard result={result} />
+  }
+
+  if (result.toolName === 'getUserWorkHours') {
+    const workHours = parseUserWorkHoursResult(result.result)
+    if (workHours) {
+      return <OaUserWorkHoursCard result={workHours} message={result.message} />
+    }
+  }
+
+  if (
+    result.toolName === 'getWorkItemDetail' &&
+    isRecord(result.result?.item)
+  ) {
+    return (
+      <OaWorkItemDetailCard
+        item={result.result.item}
+        message={result.message}
+      />
+    )
+  }
+
+  if (
+    result.toolName === 'generateDailyReportDraft' ||
+    result.toolName === 'getActiveDailyReportDraft'
+  ) {
+    const draft = parseDailyReportDraftResult(result.result)
+    if (draft) {
+      return <OaDailyReportDraftCard draft={draft} message={result.message} />
+    }
+    if (
+      result.toolName === 'getActiveDailyReportDraft' &&
+      isRecord(result.result) &&
+      readBoolean(result.result.found) === false
+    ) {
+      return null
+    }
+  }
+
+  if (result.toolName === 'prepareWorkHourFill') {
+    const action = parseWorkHourFillActionResult(result.result)
+    if (action) {
+      return <WorkHourFillResultCard action={action} message={result.message} />
+    }
+  }
+
+  if (result.toolName === 'queryDailyReportStatus') {
+    return (
+      <OaDailyReportStatusCard
+        result={result.result}
+        message={result.message}
+      />
+    )
+  }
+
+  if (result.toolName === 'submitDailyReport') {
+    return <OaDailyReportSuccessCard />
+  }
+
+  const copy = oaToolCopy[result.toolName]
+  return (
+    <OaGenericResultCard
+      icon={copy?.icon ?? ClipboardList}
+      title={copy?.title ?? '业务操作结果'}
+      badge={copy?.badge ?? 'OA'}
+      message={result.message || '业务系统已返回结果。'}
+    />
+  )
+}
+
+function OaGenericResultCard({
+  icon,
+  title,
+  badge,
+  message,
+  tone = 'default',
+}: {
+  icon: LucideIcon
+  title: string
+  badge: string
+  message: string
+  tone?: 'default' | 'success'
+}) {
+  return (
+    <Card className='w-full max-w-2xl gap-4 rounded-lg py-4 shadow-none'>
+      <CardHeader className='gap-3 px-4 sm:px-5'>
+        <div className='flex items-start gap-3'>
+          <IconFrame icon={icon} tone={tone} />
+          <div className='min-w-0 flex-1'>
+            <div className='flex min-w-0 flex-wrap items-center gap-2'>
+              <CardTitle className='truncate text-base'>{title}</CardTitle>
+              <Badge variant='secondary'>OA</Badge>
+            </div>
+            <CardDescription className='mt-1'>{message}</CardDescription>
+          </div>
+          <CardAction>
+            <Badge variant='outline'>{badge}</Badge>
+          </CardAction>
+        </div>
+      </CardHeader>
+    </Card>
+  )
+}
+
+function OaDailyReportSuccessCard() {
+  return (
+    <Card className='w-full max-w-2xl gap-0 overflow-hidden rounded-lg py-0 shadow-none'>
+      <CardHeader className='px-4 py-4 sm:px-5'>
+        <div className='flex items-start gap-3'>
+          <IconFrame icon={CheckCircle2} tone='success' />
+          <div className='min-w-0 flex-1'>
+            <CardTitle className='text-base'>日报提交成功</CardTitle>
+            <CardDescription className='mt-1'>已同步到 OA。</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+    </Card>
+  )
+}
+
+function OaErrorCard({ result }: { result: OaToolResult }) {
+  const isWorkItemPermissionError =
+    result.errorCode === 'WORK_ITEM_PERMISSION_DENIED'
+  const isDailyReportError =
+    result.toolName === 'generateDailyReportDraft' ||
+    result.toolName === 'getActiveDailyReportDraft' ||
+    result.toolName === 'queryDailyReportStatus' ||
+    result.toolName === 'submitDailyReport'
+  const isValidationError =
+    result.errorCode === 'DAILY_REPORT_VALIDATION_FAILED'
+  const isWorkHourError =
+    result.errorCode?.includes('WORK_HOUR') ||
+    result.toolName === 'prepareWorkHourFill' ||
+    result.toolName === 'saveWorkHourExecution'
+  const isWorkHourQueryError = result.toolName === 'getUserWorkHours'
+  const Icon = isWorkItemPermissionError
+    ? ShieldAlert
+    : isValidationError
+      ? AlertTriangle
+      : XCircle
+  const title = isWorkItemPermissionError
+    ? '无权查询工作项'
+    : isValidationError
+      ? '日报校验未通过'
+      : isDailyReportError
+        ? '日报暂未保存'
+        : isWorkHourQueryError
+          ? '暂时无法查询工时'
+          : isWorkHourError
+            ? '工时未保存'
+            : '暂时无法完成操作'
+  const message = isWorkItemPermissionError
+    ? result.message || '当前账号没有目标项目的工作项查询权限。'
+    : isWorkHourError
+      ? workHourErrorMessage(result)
+      : isDailyReportError
+        ? dailyReportErrorMessage(result)
+        : result.message || '请稍后重试，或检查当前 OA 登录状态。'
+
+  return (
+    <Card className='w-full max-w-xl gap-4 rounded-lg py-4 shadow-none'>
+      <CardHeader className='gap-3 px-4 sm:px-5'>
+        <div className='flex items-start gap-3'>
+          <IconFrame icon={Icon} tone='danger' />
+          <div className='min-w-0 flex-1'>
+            <div className='flex min-w-0 flex-wrap items-center gap-2'>
+              <CardTitle className='truncate text-base'>{title}</CardTitle>
+            </div>
+            <CardDescription className='mt-1'>{message}</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+    </Card>
+  )
+}
+
+function SafeToolStatus({
+  presentation,
+}: {
+  presentation: SafeToolFallbackPresentation
+}) {
+  const Icon =
+    presentation.state === 'running'
+      ? LoaderCircle
+      : presentation.state === 'failed'
+        ? XCircle
+        : presentation.state === 'waiting'
+          ? AlertTriangle
+          : CheckCircle2
+
+  return (
+    <div
+      data-slot='safe-tool-status'
+      className='flex w-full max-w-2xl items-start gap-2 py-1.5 text-sm'
+      role='status'
+    >
+      <Icon
+        className={
+          presentation.state === 'running'
+            ? 'text-muted-foreground mt-0.5 size-4 shrink-0 animate-spin'
+            : presentation.state === 'failed'
+              ? 'text-destructive mt-0.5 size-4 shrink-0'
+              : 'text-muted-foreground mt-0.5 size-4 shrink-0'
+        }
+      />
+      <div className='min-w-0'>
+        <div className='font-medium'>{presentation.title}</div>
+        <div className='text-muted-foreground mt-0.5 text-xs'>
+          {presentation.detail}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function OaToolLoadingCard({ toolName }: { toolName: string }) {
+  const copy = oaToolCopy[toolName] ?? {
+    title: '执行业务操作',
+    running: '正在等待业务系统返回结果。',
+    badge: 'OA',
+    icon: LoaderCircle,
+  }
+
+  return (
+    <Card className='w-full max-w-xl gap-4 rounded-lg py-4 shadow-none'>
+      <CardHeader className='px-4 sm:px-5'>
+        <div className='flex items-center gap-3'>
+          <div className='bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-lg'>
+            <LoaderCircle className='animate-spin' />
+          </div>
+          <div className='min-w-0 flex-1'>
+            <div className='flex min-w-0 flex-wrap items-center gap-2'>
+              <CardTitle className='truncate text-base'>{copy.title}</CardTitle>
+              <Badge variant='outline'>{copy.badge}</Badge>
+            </div>
+            <CardDescription className='mt-1'>{copy.running}</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className='flex flex-col gap-3 px-4 sm:px-5'>
+        <Skeleton className='h-8 w-40' />
+        <Skeleton className='h-20 rounded-md' />
+      </CardContent>
+    </Card>
+  )
+}
+
+function OaLoginRequiredCard({ message }: { message: string }) {
+  return (
+    <Card className='w-full max-w-xl gap-4 rounded-lg py-4 shadow-none'>
+      <CardHeader className='gap-3 px-4 sm:px-5'>
+        <div className='flex items-start gap-3'>
+          <IconFrame icon={ShieldAlert} />
+          <div className='min-w-0 flex-1'>
+            <div className='flex min-w-0 flex-wrap items-center gap-2'>
+              <CardTitle className='truncate text-base'>需要登录 OA</CardTitle>
+              <Badge variant='secondary'>OA</Badge>
+            </div>
+            <CardDescription className='mt-1'>
+              {message || '当前未登录，正在跳转到现有系统登录页'}
+            </CardDescription>
+          </div>
+          <CardAction>
+            <Button size='sm' onClick={() => redirectToOaLogin()}>
+              <LogIn />
+              去登录
+            </Button>
+          </CardAction>
+        </div>
+      </CardHeader>
+    </Card>
+  )
+}
+
+function parseOaLoginRequired(
+  result: unknown
+): OaLoginRequiredResult | undefined {
+  const parsed = typeof result === 'string' ? parseJson(result) : result
+  if (!isRecord(parsed)) return undefined
+
+  const errorCode = readString(parsed.errorCode)
+  if (errorCode !== OA_LOGIN_REQUIRED) return undefined
+
+  return {
+    message:
+      publicToolMessage(
+        parsed.message,
+        '当前未登录，正在跳转到现有系统登录页'
+      ) || '当前未登录，正在跳转到现有系统登录页',
+  }
+}
+
+function parseWorkHourFillActionResult(
+  result: Record<string, unknown> | undefined
+): WorkHourFillActionResult | undefined {
+  if (!result) return undefined
+  const items = readMissingWorkHourItems(
+    result.missingWorkHourItems ?? result.items
+  )
+
+  return {
+    workDate: readString(result.workDate),
+    items,
+    confirmationContext: isRecord(result.confirmationContext)
+      ? result.confirmationContext
+      : undefined,
+  }
+}
