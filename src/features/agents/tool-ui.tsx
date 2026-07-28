@@ -231,7 +231,10 @@ export const AgentToolFallback: ToolCallMessagePartComponent = (props) => {
 }
 
 function OaToolResultCard({ result }: { result: OaToolResult }) {
-  if (result.toolName === 'getMyWorkItems') {
+  if (
+    result.toolName === 'getMyWorkItems' ||
+    result.toolName === 'getWorkItemDetail'
+  ) {
     const workItems = parseWorkItemsResult(result.result)
     if (workItems) {
       return <OaWorkItemsCard result={workItems} message={result.message} />

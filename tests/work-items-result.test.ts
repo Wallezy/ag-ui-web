@@ -136,3 +136,25 @@ test('keeps assignee and project query context for the result card', () => {
     projectName: '星云平台',
   })
 })
+
+test('presents ambiguous title matches as a selectable candidate list', () => {
+  const result = parseWorkItemsResult({
+    resolutionStatus: 'AMBIGUOUS',
+    reference: '接口文档',
+    items: [
+      { type: 'task', code: 'RCPM-18', title: '编写接口文档' },
+      { type: 'task', code: 'OPS-6', title: '补充接口文档' },
+    ],
+    count: 2,
+    queryStatus: 'COMPLETE',
+    queriedWorkItemTypes: ['task'],
+  })
+
+  assert.ok(result)
+  assert.equal(result.resolutionStatus, 'AMBIGUOUS')
+  assert.equal(result.reference, '接口文档')
+  const presentation = workItemQueryPresentation(result)
+  assert.equal(presentation.title, '找到多个匹配的工作项')
+  assert.equal(presentation.badge, '请选择')
+  assert.match(presentation.description, /接口文档.*2 项.*选择/)
+})

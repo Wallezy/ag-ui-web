@@ -273,7 +273,8 @@ function WorkItemRow({ item }: { item: Record<string, unknown> }) {
   const referenceTitle =
     readText(item.title) || readText(item.name) || readText(item.subject) || ''
   const title = referenceTitle || readText(item.id) || '未命名工作项'
-  const reference = readText(item.code) || referenceTitle
+  const code = readText(item.code)
+  const reference = code || referenceTitle
   const type = readText(item.type) || readText(item.workItemType) || ''
   const status = readText(item.status) || readText(item.state)
   const project =
@@ -296,10 +297,11 @@ function WorkItemRow({ item }: { item: Record<string, unknown> }) {
     if (!canOpenDetail || aui.thread().getState().isRunning) return
     const safeReference = reference.replace(/["'“”‘’「」『』\n\r]/g, ' ').trim()
     const kind = type.toLowerCase() === 'bug' ? '缺陷' : '任务'
+    const prompt = code
+      ? `查看${kind} ${safeReference} 的详细信息`
+      : `查看${kind}“${safeReference}”的详细信息`
     aui.thread().append({
-      content: [
-        { type: 'text', text: `查看${kind}「${safeReference}」的详细信息` },
-      ],
+      content: [{ type: 'text', text: prompt }],
       runConfig: aui.composer().getState().runConfig,
     })
   }
@@ -315,6 +317,7 @@ function WorkItemRow({ item }: { item: Record<string, unknown> }) {
           <div className='truncate text-sm font-medium'>{title}</div>
         </div>
         <div className='text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs'>
+          {code ? <span>编号 {code}</span> : null}
           {project ? <span>{project}</span> : null}
           {owner ? <span>负责人 {owner}</span> : null}
           {dueDate ? <span>截止 {formatDateText(dueDate)}</span> : null}

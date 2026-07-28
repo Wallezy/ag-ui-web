@@ -23,6 +23,8 @@ export type WorkItemQueryCompleteness = {
 export type WorkItemsResult = {
   items: Record<string, unknown>[]
   count: number
+  resolutionStatus?: string
+  reference?: string
   user?: Record<string, unknown>
   requestedBy?: Record<string, unknown>
   dateRange?: Record<string, unknown>
@@ -87,6 +89,8 @@ export function parseWorkItemsResult(
   return {
     items,
     count: numberValue(result.count) ?? items.length,
+    resolutionStatus: text(result.resolutionStatus),
+    reference: text(result.reference),
     user: isRecord(result.user) ? result.user : undefined,
     requestedBy: isRecord(result.requestedBy) ? result.requestedBy : undefined,
     dateRange: isRecord(result.dateRange) ? result.dateRange : undefined,
@@ -126,6 +130,18 @@ export function workItemQueryPresentation(
   result: WorkItemsResult,
   completeMessage?: string
 ): WorkItemQueryPresentation {
+  if (result.resolutionStatus === 'AMBIGUOUS') {
+    const reference = result.reference ? `“${result.reference}”` : '该条件'
+    return {
+      title: '找到多个匹配的工作项',
+      badge: '请选择',
+      description: `${reference}匹配到 ${result.count} 项，请从列表中选择要查看的工作项。`,
+      countLabel: `${result.count} 项`,
+      emptyTitle: '没有可选择的工作项',
+      emptyDescription: '请换一个更完整的标题或业务编号重新查询。',
+    }
+  }
+
   const { status } = result.completeness
   if (status === 'FAILED') {
     return {
